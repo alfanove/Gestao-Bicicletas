@@ -1,0 +1,5 @@
+{
+  "name": "Bike Rental Management",
+  "description": "An application to manage a fleet of rental bicycles, including maintenance tracking and booking calendars.",
+  "requestFramePermissions": []
+}
