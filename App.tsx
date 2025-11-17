@@ -3,26 +3,34 @@ import { Bike, BikeStatus, MaintenanceRecord, MaintenanceStatus, Booking } from 
 import { PlusIcon, WrenchIcon, CalendarIcon, ArrowLeftIcon, TrashIcon, PencilIcon, BellIcon } from './components/Icons';
 import Modal from './components/Modal';
 import Calendar from './components/Calendar';
+import { initialBikes, initialMaintenance, initialBookings } from './data/mock';
 
-// Mock Data updated to better match the design
-const initialBikes: Bike[] = [
-  { id: 'bike-1', ref_no: 'M42', brand: 'Caloi', model: 'Explorer', size: 'M', status: BikeStatus.AVAILABLE, entryDate: new Date('2023-01-15'), imageUrl: 'https://images.unsplash.com/photo-1576426863848-c21f68c6aa98?w=400&q=80' },
-  { id: 'bike-2', ref_no: 'L16', brand: 'Specialized', model: 'Rockhopper', size: 'L', status: BikeStatus.RENTED, entryDate: new Date('2023-02-20'), imageUrl: 'https://images.unsplash.com/photo-1559348344-3e9d36a62319?w=400&q=80' },
-  { id: 'bike-3', ref_no: 'M88', brand: 'Trek', model: 'Marlin 5', size: 'M', status: BikeStatus.MAINTENANCE, entryDate: new Date('2023-03-10'), imageUrl: 'https://images.unsplash.com/photo-1575585252969-fe85b6513514?w=400&q=80' },
-  { id: 'bike-4', ref_no: 'S05', brand: 'Scott', model: 'Aspect 960', size: 'S', status: BikeStatus.AVAILABLE, entryDate: new Date('2023-04-01'), imageUrl: 'https://images.unsplash.com/photo-1532298229144-0ec0c57515c7?w=400&q=80' },
-];
+// Helper function to load data from localStorage
+// FIX: Disambiguate generic type parameter from JSX tag. In a .tsx file, <T> can be misinterpreted as a JSX tag. Adding a trailing comma, <T,>, clarifies that it's a generic type parameter, resolving a cascade of parsing errors throughout the file.
+const loadFromLocalStorage = <T,>(key: string, fallbackData: any[], reviver?: (key: string, value: any) => any): T[] => {
+  try {
+    const storedData = localStorage.getItem(key);
+    if (storedData) {
+      // The reviver function is crucial to convert date strings back to Date objects
+      return JSON.parse(storedData, reviver);
+    }
+  } catch (error) {
+    console.error(`Error reading ${key} from localStorage`, error);
+  }
+  return fallbackData;
+};
 
-const initialMaintenance: MaintenanceRecord[] = [
-  { id: 'maint-1', bikeId: 'bike-3', description: 'Freio traseiro com problema.', tasks: ['Afinar travões'], reportedDate: new Date('2023-10-20'), status: MaintenanceStatus.PENDING, workshopNotes: 'Pastilhas gastas, foi feita a substituição.' },
-  { id: 'maint-2', bikeId: 'bike-2', description: 'Pneu furado.', tasks: ['Troca pneu da frente', 'Substituição de câmara de ar'], reportedDate: new Date('2023-10-15'), resolvedDate: new Date('2023-10-16'), status: MaintenanceStatus.RESOLVED, workshopNotes: 'Pneu dianteiro substituído e câmara de ar trocada.' },
-];
-
-const initialBookings: Booking[] = [
-    { id: 'book-1', bikeId: 'bike-2', customerName: 'João Silva', startDate: new Date('2025-11-17'), endDate: new Date('2025-11-19')},
-    { id: 'book-2', bikeId: 'bike-1', customerName: 'Maria Oliveira', startDate: new Date('2025-11-22'), endDate: new Date('2025-11-24') },
-    { id: 'book-3', bikeId: 'bike-4', customerName: 'Carlos Pereira', startDate: new Date('2025-11-07'), endDate: new Date('2025-11-09') },
-    { id: 'book-4', bikeId: 'bike-1', customerName: 'Ana Costa', startDate: new Date('2025-11-27'), endDate: new Date('2025-11-29') },
-];
+// Reviver function to parse dates correctly from JSON
+const dateReviver = (key: string, value: any) => {
+  const dateKeys = ['entryDate', 'reportedDate', 'resolvedDate', 'startDate', 'endDate'];
+  if (dateKeys.includes(key) && typeof value === 'string') {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  return value;
+};
 
 
 const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
@@ -49,9 +57,24 @@ const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
 }
 
 const App: React.FC = () => {
-  const [bikes, setBikes] = useState<Bike[]>(initialBikes);
-  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(initialMaintenance);
-  const [bookings, setBookings] = useState<Booking[]>(initialBookings);
+    // Initialize state from localStorage or fallback to mock data
+  const [bikes, setBikes] = useState<Bike[]>(() => loadFromLocalStorage<Bike>('bikes', initialBikes, dateReviver));
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(() => loadFromLocalStorage<MaintenanceRecord>('maintenanceRecords', initialMaintenance, dateReviver));
+  const [bookings, setBookings] = useState<Booking[]>(() => loadFromLocalStorage<Booking>('bookings', initialBookings, dateReviver));
+  const [isLoadingBikes, setIsLoadingBikes] = useState(false); // No longer loading from API
+  const [error, setError] = useState<string | null>(null);
+
+  // Effect to save data to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('bikes', JSON.stringify(bikes));
+      localStorage.setItem('maintenanceRecords', JSON.stringify(maintenanceRecords));
+      localStorage.setItem('bookings', JSON.stringify(bookings));
+    } catch (error) {
+      console.error("Error saving data to localStorage", error);
+      setError("Não foi possível guardar as alterações no navegador. O armazenamento pode estar cheio.");
+    }
+  }, [bikes, maintenanceRecords, bookings]);
   
   const brands = useMemo(() => [...new Set(bikes.map(b => b.brand))].sort(), [bikes]);
   const models = useMemo(() => [...new Set(bikes.map(b => b.model))].sort(), [bikes]);
@@ -391,7 +414,40 @@ const App: React.FC = () => {
     setActiveModal('editBike');
   };
 
-  const renderBikeList = () => (
+  const renderBikeList = () => {
+    if (isLoadingBikes) {
+        return (
+            <div className="p-4 sm:p-6 lg:p-8">
+                <div className="flex justify-between items-center mb-6">
+                    <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
+                    <div className="flex items-center gap-4">
+                        <button onClick={openAddModal} className="flex items-center gap-2 bg-brand-primary text-white font-bold px-4 py-2 rounded-lg shadow-md hover:bg-brand-primary-dark transition-colors">
+                            <PlusIcon className="h-5 w-5" />
+                            <span>Adicionar Bicicleta</span>
+                        </button>
+                    </div>
+                </div>
+                <div className="text-center py-20 text-gray-500">
+                    <p>A carregar bicicletas...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+         return (
+            <div className="p-4 sm:p-6 lg:p-8">
+                <div className="flex justify-between items-center mb-6">
+                    <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
+                </div>
+                <div className="text-center py-20 bg-red-50 text-red-600 rounded-lg shadow">
+                    <p>{error}</p>
+                </div>
+            </div>
+        );
+    }
+      
+    return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
@@ -496,7 +552,7 @@ const App: React.FC = () => {
         )}
       </div>
     </div>
-  );
+  )};
 
   const renderBikeDetails = () => (
     selectedBike && (
