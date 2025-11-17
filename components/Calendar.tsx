@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { Booking } from '../types';
+import { Booking, Bike } from '../types';
 
 interface CalendarProps {
   bookings: Booking[];
+  bikes: Bike[];
 }
 
-const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
-  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+const Calendar: React.FC<CalendarProps> = ({ bookings, bikes }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  // FIX: Add viewMode state to control calendar display (map or list).
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('map');
 
-  // --- Common Logic & Calendar Map Logic ---
   const daysOfWeek = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const monthNames = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -29,17 +30,35 @@ const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
     day.setDate(day.getDate() + 1);
   }
    
-  const isBooked = (date: Date) => {
-    return bookings.some(booking => {
-        const bookingStart = new Date(booking.startDate);
-        bookingStart.setHours(0,0,0,0);
-        const bookingEnd = new Date(booking.endDate);
-        bookingEnd.setHours(0,0,0,0);
-        const checkDate = new Date(date);
-        checkDate.setHours(0,0,0,0);
-        return checkDate >= bookingStart && checkDate <= bookingEnd;
-    });
+  const getBookingsSummaryForDate = (date: Date): string => {
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    const modelsOnDate = bookings
+        .filter(booking => {
+            const bookingStart = new Date(booking.startDate);
+            bookingStart.setHours(0, 0, 0, 0);
+            const bookingEnd = new Date(booking.endDate);
+            bookingEnd.setHours(0, 0, 0, 0);
+            return checkDate >= bookingStart && checkDate <= bookingEnd;
+        })
+        .map(booking => bikes.find(b => b.id === booking.bikeId)?.model)
+        .filter((model): model is string => !!model);
+
+    if (modelsOnDate.length === 0) {
+        return '';
+    }
+
+    const modelCounts = modelsOnDate.reduce((acc, model) => {
+        acc[model] = (acc[model] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    return Object.entries(modelCounts)
+        .map(([model, count]) => `${model} (${count})`)
+        .join('; ');
   };
+
 
   const handleDateClick = (date: Date) => {
     if (selectedDate && selectedDate.toDateString() === date.toDateString()) {
@@ -88,7 +107,8 @@ const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
         {days.map((d, index) => {
           const isCurrentMonth = d.getMonth() === currentDate.getMonth();
           const isToday = d.toDateString() === new Date().toDateString();
-          const booked = isBooked(d);
+          const bookingsSummary = getBookingsSummaryForDate(d);
+          const booked = bookingsSummary !== '';
           const isSelected = selectedDate?.toDateString() === d.toDateString();
 
           return (
@@ -96,19 +116,24 @@ const Calendar: React.FC<CalendarProps> = ({ bookings }) => {
               key={index}
               onClick={() => handleDateClick(d)}
               className={`
-                w-full aspect-square flex items-center justify-center rounded-lg relative transition-all duration-200 ease-in-out cursor-pointer
-                ${isCurrentMonth ? 'text-gray-800 hover:bg-gray-100 hover:scale-110 hover:shadow-md' : 'text-gray-300'}
+                w-full aspect-square rounded-lg relative transition-all duration-200 ease-in-out cursor-pointer p-1 text-left align-top
+                ${isCurrentMonth ? 'text-gray-800 hover:bg-gray-100 hover:scale-105' : 'text-gray-300'}
                 ${isSelected 
                     ? 'bg-brand-primary text-white font-bold ring-2 ring-brand-primary-dark' 
                     : booked 
                         ? 'bg-orange-200' 
                         : isToday 
-                            ? 'bg-blue-100 font-bold' 
+                            ? 'bg-blue-100' 
                             : ''
                 }
               `}
             >
-              <span>{d.getDate()}</span>
+              <span className={`text-sm ${isToday && !booked ? 'font-bold' : ''} ${isSelected ? 'font-bold' : ''}`}>{d.getDate()}</span>
+                {booked && !isSelected && (
+                    <div className="text-[10px] leading-tight mt-1 text-orange-900 font-semibold overflow-hidden max-h-[calc(100%-1.25rem)]">
+                        {bookingsSummary}
+                    </div>
+                )}
             </div>
           );
         })}

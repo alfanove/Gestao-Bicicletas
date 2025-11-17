@@ -79,7 +79,7 @@ const App: React.FC = () => {
   const brands = useMemo(() => [...new Set(bikes.map(b => b.brand))].sort(), [bikes]);
   const models = useMemo(() => [...new Set(bikes.map(b => b.model))].sort(), [bikes]);
 
-  const [activeView, setActiveView] = useState<'bikes' | 'bookings'>('bikes');
+  const [activeView, setActiveView] = useState<'bikes' | 'bookings'>('bookings');
   const [selectedBike, setSelectedBike] = useState<Bike | null>(null);
   const [activeModal, setActiveModal] = useState<'addBike' | 'editBike' | 'reportFault' | 'maintenanceProcess' | 'manageTaskTypes' | 'addBooking' | null>(null);
   const [bikeToEdit, setBikeToEdit] = useState<Bike | null>(null);
@@ -124,7 +124,7 @@ const App: React.FC = () => {
   const [bookingFilterBrand, setBookingFilterBrand] = useState('');
   const [bookingFilterModel, setBookingFilterModel] = useState('');
   const [bookingFilterSize, setBookingFilterSize] = useState<'S' | 'M' | 'L' | 'XL' | ''>('');
-  const [bookingsViewMode, setBookingsViewMode] = useState<'list' | 'calendar'>('list');
+  const [bookingsViewMode, setBookingsViewMode] = useState<'calendar' | 'list'>('calendar');
   const [currentBookingsCalendarDate, setCurrentBookingsCalendarDate] = useState(new Date('2025-11-01'));
   
   // State for notifications
@@ -592,7 +592,7 @@ const App: React.FC = () => {
                             <CalendarIcon className="h-5 w-5" /> Nova Reserva
                         </button>
                     </div>
-                    <Calendar bookings={selectedBikeBookings} />
+                    <Calendar bookings={selectedBikeBookings} bikes={bikes} />
                 </div>
                 <div>
                     <div className="flex justify-between items-center mb-4">
@@ -669,16 +669,33 @@ const App: React.FC = () => {
         dayIterator.setDate(dayIterator.getDate() + 1);
     }
 
-    const isDateInFilteredBookings = (date: Date) => {
+    const getBookingsSummaryForDate = (date: Date): string => {
         const checkDate = new Date(date);
         checkDate.setHours(0, 0, 0, 0);
-        return filteredBookings.some(booking => {
-            const bookingStart = new Date(booking.startDate);
-            bookingStart.setHours(0, 0, 0, 0);
-            const bookingEnd = new Date(booking.endDate);
-            bookingEnd.setHours(0, 0, 0, 0);
-            return checkDate >= bookingStart && checkDate <= bookingEnd;
-        });
+
+        const modelsOnDate = filteredBookings
+            .filter(booking => {
+                const bookingStart = new Date(booking.startDate);
+                bookingStart.setHours(0, 0, 0, 0);
+                const bookingEnd = new Date(booking.endDate);
+                bookingEnd.setHours(0, 0, 0, 0);
+                return checkDate >= bookingStart && checkDate <= bookingEnd;
+            })
+            .map(booking => bikes.find(b => b.id === booking.bikeId)?.model)
+            .filter((model): model is string => !!model);
+
+        if (modelsOnDate.length === 0) {
+            return '';
+        }
+
+        const modelCounts = modelsOnDate.reduce((acc, model) => {
+            acc[model] = (acc[model] || 0) + 1;
+            return acc;
+        }, {} as Record<string, number>);
+
+        return Object.entries(modelCounts)
+            .map(([model, count]) => `${model} (${count})`)
+            .join('; ');
     };
 
     const prevMonth = () => {
@@ -703,15 +720,21 @@ const App: React.FC = () => {
                 {daysInCalendar.map((d, index) => {
                     const isCurrentMonth = d.getMonth() === currentBookingsCalendarDate.getMonth();
                     const isToday = d.toDateString() === new Date().toDateString();
-                    const isBooked = isDateInFilteredBookings(d);
+                    const bookingsSummary = getBookingsSummaryForDate(d);
+                    const isBooked = bookingsSummary !== '';
 
                     return (
-                        <div key={index} className={`w-full aspect-square flex items-center justify-center rounded-lg transition-all duration-200 ease-in-out
+                        <div key={index} className={`w-full aspect-square rounded-lg p-1 text-left align-top
                             ${isCurrentMonth ? 'text-gray-800' : 'text-gray-300'}
-                            ${isBooked ? 'bg-orange-200 font-bold text-orange-800' : ''}
+                            ${isBooked ? 'bg-orange-200' : ''}
                             ${!isBooked && isToday ? 'bg-blue-100' : ''}
                         `}>
-                            <span>{d.getDate()}</span>
+                            <span className={`text-xs ${isToday && !isBooked ? 'font-bold' : ''}`}>{d.getDate()}</span>
+                            {isBooked && (
+                                <div className="text-[10px] leading-tight mt-1 text-orange-900 font-semibold overflow-hidden max-h-[calc(100%-1rem)]">
+                                    {bookingsSummary}
+                                </div>
+                            )}
                         </div>
                     );
                 })}
@@ -727,7 +750,7 @@ const App: React.FC = () => {
     return (
         <div className="p-4 sm:p-6 lg:p-8">
             <div className="flex justify-between items-center mb-6">
-                 <h1 className="text-3xl font-bold text-gray-800">Gestão de Reservas</h1>
+                 <h1 className="text-3xl font-bold text-gray-800">Gestão de Aluguer</h1>
                  <div className="flex items-center gap-2 p-1 bg-gray-100 rounded-lg">
                     <button onClick={() => setBookingsViewMode('list')} className={`px-3 py-1 text-sm font-semibold rounded-md transition ${bookingsViewMode === 'list' ? 'bg-white shadow' : 'text-gray-600 hover:bg-gray-200'}`}>Lista</button>
                     <button onClick={() => setBookingsViewMode('calendar')} className={`px-3 py-1 text-sm font-semibold rounded-md transition ${bookingsViewMode === 'calendar' ? 'bg-white shadow' : 'text-gray-600 hover:bg-gray-200'}`}>Calendário</button>
