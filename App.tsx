@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Bike, BikeStatus, MaintenanceRecord, MaintenanceStatus, Booking } from './types';
 import { PlusIcon, WrenchIcon, CalendarIcon, ArrowLeftIcon, TrashIcon, PencilIcon, BellIcon } from './components/Icons';
@@ -48,9 +47,9 @@ const App: React.FC = () => {
         if (bikesError) throw bikesError;
         setBikes(bikesData || []);
         
-        const { data: maintData, error: maintError } = await supabase.from('maintenance_records').select('*').returns<MaintenanceRecord[]>();
+        const { data: maintData, error: maintError } = await supabase.from('maintenance_records').select('*');
         if (maintError) throw maintError;
-        setMaintenanceRecords(maintData.map(m => ({...m, reported_date: new Date(m.reported_date), resolved_date: m.resolved_date ? new Date(m.resolved_date) : undefined })) || []);
+        setMaintenanceRecords(maintData || []);
 
         const { data: bookingsData, error: bookingsError } = await supabase.from('bookings').select('*');
         if (bookingsError) throw bookingsError;
@@ -442,7 +441,7 @@ const App: React.FC = () => {
     }
 
     if (newRecord && updatedBike) {
-        setMaintenanceRecords(prev => [{...newRecord, reported_date: new Date(newRecord.reported_date), resolved_date: undefined}, ...prev]);
+        setMaintenanceRecords(prev => [newRecord, ...prev]);
         setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
         setSelectedBike(updatedBike);
         setActiveModal(null);
@@ -473,11 +472,10 @@ const App: React.FC = () => {
       }
       
       if (newRecord && updatedBike) {
-          const formattedRecord = {...newRecord, reported_date: new Date(newRecord.reported_date), resolved_date: undefined };
-          setMaintenanceRecords(prev => [formattedRecord, ...prev]);
+          setMaintenanceRecords(prev => [newRecord, ...prev]);
           setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
           setSelectedBike(updatedBike);
-          openMaintenanceProcessModal(formattedRecord);
+          openMaintenanceProcessModal(newRecord);
       }
   };
 
@@ -505,8 +503,7 @@ const App: React.FC = () => {
     }
     
     if (updatedRecord) {
-        const formattedRecord = {...updatedRecord, reported_date: new Date(updatedRecord.reported_date), resolved_date: updatedRecord.resolved_date ? new Date(updatedRecord.resolved_date) : undefined };
-        setMaintenanceRecords(maintenanceRecords.map(m => m.id === formattedRecord.id ? formattedRecord : m));
+        setMaintenanceRecords(maintenanceRecords.map(m => m.id === updatedRecord.id ? updatedRecord : m));
     }
 
     if (conclude) {

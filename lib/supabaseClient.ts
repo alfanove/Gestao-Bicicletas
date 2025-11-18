@@ -1,12 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-// FIX: Import BikeStatus and MaintenanceStatus enums.
 import { Bike, MaintenanceRecord, Booking, BikeStatus, MaintenanceStatus } from '../types';
 
 // These environment variables must be set in your hosting environment (e.g., Vercel).
 // They are the Project URL and the public anon key from your Supabase project settings.
-// FIX: Use process.env to access environment variables.
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
-// FIX: Use process.env to access environment variables.
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
