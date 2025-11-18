@@ -6,7 +6,7 @@ import Calendar from './components/Calendar';
 import { initialBikes, initialMaintenance, initialBookings } from './data/mock';
 
 // Helper function to load data from localStorage
-// FIX: Disambiguate generic type parameter from JSX tag. In a .tsx file, <T> can be misinterpreted as a JSX tag. Adding a trailing comma, <T,>, clarifies that it's a generic type parameter, resolving a cascade of parsing errors throughout the file.
+// FIX: Disambiguated generic type parameter from JSX tag. In a .tsx file, <T> can be misinterpreted as a JSX tag. Adding a trailing comma, <T,>, clarifies that it's a generic type parameter, resolving a cascade of parsing errors throughout the file.
 const loadFromLocalStorage = <T,>(key: string, fallbackData: any[], reviver?: (key: string, value: any) => any): T[] => {
   try {
     const storedData = localStorage.getItem(key);
@@ -63,6 +63,14 @@ const App: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>(() => loadFromLocalStorage<Booking>('bookings', initialBookings, dateReviver));
   const [isLoadingBikes, setIsLoadingBikes] = useState(false); // No longer loading from API
   const [error, setError] = useState<string | null>(null);
+  
+  // State for confirmation modal
+  const [confirmationModal, setConfirmationModal] = useState<{ 
+    isOpen: boolean; 
+    title: string; 
+    message: string; 
+    onConfirm: () => void; 
+  } | null>(null);
 
   // Effect to save data to localStorage whenever it changes
   useEffect(() => {
@@ -79,9 +87,9 @@ const App: React.FC = () => {
   const brands = useMemo(() => [...new Set(bikes.map(b => b.brand))].sort(), [bikes]);
   const models = useMemo(() => [...new Set(bikes.map(b => b.model))].sort(), [bikes]);
 
-  const [activeView, setActiveView] = useState<'bikes' | 'bookings'>('bookings');
+  const [activeView, setActiveView] = useState<'bikes' | 'bookings'>('bikes');
   const [selectedBike, setSelectedBike] = useState<Bike | null>(null);
-  const [activeModal, setActiveModal] = useState<'addBike' | 'editBike' | 'reportFault' | 'maintenanceProcess' | 'manageTaskTypes' | 'addBooking' | null>(null);
+  const [activeModal, setActiveModal] = useState<'addBike' | 'editBike' | 'reportFault' | 'maintenanceProcess' | 'manageTaskTypes' | 'booking' | null>(null);
   const [bikeToEdit, setBikeToEdit] = useState<Bike | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
@@ -90,6 +98,10 @@ const App: React.FC = () => {
   const [filterSize, setFilterSize] = useState<'S' | 'M' | 'L' | 'XL' | ''>('');
   const [filterBrand, setFilterBrand] = useState('');
   const [filterModel, setFilterModel] = useState('');
+  const [availabilityFilterStartDate, setAvailabilityFilterStartDate] = useState<Date | null>(null);
+  const [availabilityFilterEndDate, setAvailabilityFilterEndDate] = useState<Date | null>(null);
+  const [isAvailabilityCalendarOpen, setIsAvailabilityCalendarOpen] = useState(false);
+  const availabilityFilterRef = useRef<HTMLDivElement>(null);
 
   // State for maintenance form
   const [maintenanceTaskOptions, setMaintenanceTaskOptions] = useState<string[]>([
@@ -124,12 +136,20 @@ const App: React.FC = () => {
   const [bookingFilterBrand, setBookingFilterBrand] = useState('');
   const [bookingFilterModel, setBookingFilterModel] = useState('');
   const [bookingFilterSize, setBookingFilterSize] = useState<'S' | 'M' | 'L' | 'XL' | ''>('');
-  const [bookingsViewMode, setBookingsViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [bookingsViewMode, setBookingsViewMode] = useState<'calendar' | 'list'>('list');
   const [currentBookingsCalendarDate, setCurrentBookingsCalendarDate] = useState(new Date('2025-11-01'));
   
   // State for notifications
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
+  
+  // State for Booking Modal
+  const [bookingToEdit, setBookingToEdit] = useState<Booking | null>(null);
+  const [bookingStartDate, setBookingStartDate] = useState<Date | null>(null);
+  const [bookingEndDate, setBookingEndDate] = useState<Date | null>(null);
+  const [bookingHoverDate, setBookingHoverDate] = useState<Date | null>(null);
+  const [bookingFormCalendarDate, setBookingFormCalendarDate] = useState(new Date());
+
 
   const OVERDUE_DAYS_THRESHOLD = 7;
   
@@ -174,12 +194,15 @@ const App: React.FC = () => {
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
         setIsNotificationsOpen(false);
       }
+      if (availabilityFilterRef.current && !availabilityFilterRef.current.contains(event.target as Node)) {
+        setIsAvailabilityCalendarOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [notificationRef]);
+  }, [notificationRef, availabilityFilterRef]);
 
 
   const selectedBikeMaintenance = useMemo(() => {
@@ -192,17 +215,45 @@ const App: React.FC = () => {
   
   const filteredBikes = useMemo(() => {
     return bikes.filter(bike => {
-        if (filterStatus && bike.status !== filterStatus) return false;
+        if (availabilityFilterStartDate && availabilityFilterEndDate) {
+            if (bike.status === BikeStatus.MAINTENANCE) {
+                return false;
+            }
+
+            const hasOverlappingBooking = bookings.some(booking => {
+                if (booking.bikeId !== bike.id) return false;
+
+                const bookingStart = new Date(booking.startDate);
+                bookingStart.setHours(0, 0, 0, 0);
+                const bookingEnd = new Date(booking.endDate);
+                bookingEnd.setHours(0, 0, 0, 0);
+
+                const filterStart = new Date(availabilityFilterStartDate);
+                filterStart.setHours(0, 0, 0, 0);
+                const filterEnd = new Date(availabilityFilterEndDate);
+                filterEnd.setHours(0, 0, 0, 0);
+
+                return bookingStart <= filterEnd && bookingEnd >= filterStart;
+            });
+
+            if (hasOverlappingBooking) {
+                return false;
+            }
+        }
+        
+        if (!(availabilityFilterStartDate && availabilityFilterEndDate) && filterStatus && bike.status !== filterStatus) return false;
         if (filterSize && bike.size !== filterSize) return false;
         if (filterBrand && bike.brand !== filterBrand) return false;
         if (filterModel && bike.model !== filterModel) return false;
+        
         return true;
     });
-  }, [bikes, filterStatus, filterSize, filterBrand, filterModel]);
+  }, [bikes, bookings, filterStatus, filterSize, filterBrand, filterModel, availabilityFilterStartDate, availabilityFilterEndDate]);
+
 
   const filteredBookings = useMemo(() => {
     return bookings.filter(booking => {
-        if (bookingFilterId && !booking.id.toLowerCase().includes(bookingFilterId.toLowerCase())) {
+        if (bookingFilterId && !booking.bookingNumber.toLowerCase().includes(bookingFilterId.toLowerCase())) {
             return false;
         }
 
@@ -286,12 +337,18 @@ const App: React.FC = () => {
   };
 
   const handleDeleteBike = (bikeId: string) => {
-    if (window.confirm("Tem certeza que deseja remover esta bicicleta?")) {
-        setBikes(bikes.filter(b => b.id !== bikeId));
-        setMaintenanceRecords(maintenanceRecords.filter(m => m.bikeId !== bikeId));
-        setBookings(bookings.filter(b => b.bikeId !== bikeId));
-        if(selectedBike?.id === bikeId) setSelectedBike(null);
-    }
+    setConfirmationModal({
+        isOpen: true,
+        title: "Confirmar Eliminação",
+        message: "Tem a certeza que deseja remover esta bicicleta? Todos os registos de manutenção e reservas associados serão também eliminados.",
+        onConfirm: () => {
+            setBikes(bikes.filter(b => b.id !== bikeId));
+            setMaintenanceRecords(maintenanceRecords.filter(m => m.bikeId !== bikeId));
+            setBookings(bookings.filter(b => b.bikeId !== bikeId));
+            if(selectedBike?.id === bikeId) setSelectedBike(null);
+            setConfirmationModal(null);
+        }
+    });
   };
 
   const handleReportFault = (e: React.FormEvent<HTMLFormElement>) => {
@@ -388,19 +445,79 @@ const App: React.FC = () => {
       setCurrentEditingTasks(prev => prev.filter(task => task !== taskToRemove));
   };
 
-  const handleAddBooking = (e: React.FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      if (!selectedBike) return;
-      const formData = new FormData(e.currentTarget);
-      const newBooking: Booking = {
-          id: `book-${Date.now()}`,
-          bikeId: selectedBike.id,
-          customerName: formData.get('customerName') as string,
-          startDate: new Date(formData.get('startDate') as string),
-          endDate: new Date(formData.get('endDate') as string),
-      };
+  const handleSaveBooking = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!bookingStartDate || !bookingEndDate) {
+      alert("Por favor, selecione uma data de início e de fim.");
+      return;
+    }
+    if (!selectedBike) {
+        alert("Nenhuma bicicleta selecionada para a reserva.");
+        return;
+    }
+
+    const formData = new FormData(e.currentTarget);
+    const bookingData = {
+      bookingNumber: formData.get('bookingNumber') as string,
+      notes: formData.get('notes') as string,
+      startDate: bookingStartDate,
+      endDate: bookingEndDate,
+      bikeId: selectedBike.id,
+    };
+
+    if (bookingToEdit) {
+      // Editing existing booking
+      const updatedBooking: Booking = { ...bookingToEdit, ...bookingData };
+      setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
+    } else {
+      // Adding new booking
+      const newBooking: Booking = { ...bookingData, id: `book-${Date.now()}` };
       setBookings([newBooking, ...bookings]);
-      setActiveModal(null);
+    }
+    
+    setActiveModal(null);
+  };
+
+  const handleDeleteBooking = (bookingId: string) => {
+    setConfirmationModal({
+        isOpen: true,
+        title: "Confirmar Eliminação",
+        message: "Tem a certeza que deseja remover esta reserva? Esta ação não pode ser desfeita.",
+        onConfirm: () => {
+            setBookings(bookings.filter(b => b.id !== bookingId));
+            setConfirmationModal(null); // Close modal after action
+        }
+    });
+  };
+  
+  const openBookingModal = (booking: Booking | null) => {
+    setBookingToEdit(booking);
+    if (booking) {
+      setBookingStartDate(new Date(booking.startDate));
+      setBookingEndDate(new Date(booking.endDate));
+      setBookingFormCalendarDate(new Date(booking.startDate));
+    } else {
+      setBookingStartDate(null);
+      setBookingEndDate(null);
+      setBookingFormCalendarDate(new Date());
+    }
+    setActiveModal('booking');
+  };
+
+  const handleDateRangePickerClick = (day: Date) => {
+    if (!bookingStartDate || bookingEndDate) {
+      // Start new selection
+      setBookingStartDate(day);
+      setBookingEndDate(null);
+    } else {
+      // End selection
+      if (day < bookingStartDate) {
+        setBookingEndDate(bookingStartDate);
+        setBookingStartDate(day);
+      } else {
+        setBookingEndDate(day);
+      }
+    }
   };
 
   const openAddModal = () => {
@@ -413,6 +530,103 @@ const App: React.FC = () => {
     setImagePreview(bike.imageUrl);
     setActiveModal('editBike');
   };
+
+  const [availabilityCalendarDate, setAvailabilityCalendarDate] = useState(new Date());
+  const [availabilityHoverDate, setAvailabilityHoverDate] = useState<Date | null>(null);
+
+  const handleAvailabilityDateClick = (day: Date) => {
+    if (!availabilityFilterStartDate || availabilityFilterEndDate) {
+      setAvailabilityFilterStartDate(day);
+      setAvailabilityFilterEndDate(null);
+    } else {
+      if (day < availabilityFilterStartDate) {
+        setAvailabilityFilterEndDate(availabilityFilterStartDate);
+        setAvailabilityFilterStartDate(day);
+      } else {
+        setAvailabilityFilterEndDate(day);
+      }
+      setIsAvailabilityCalendarOpen(false);
+    }
+  };
+  
+  const renderAvailabilityCalendar = () => {
+    const monthNames = [ 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro' ];
+    const daysOfWeek = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+    const startOfMonth = new Date(availabilityCalendarDate.getFullYear(), availabilityCalendarDate.getMonth(), 1);
+    const startDate = new Date(startOfMonth);
+    startDate.setDate(startDate.getDate() - startOfMonth.getDay());
+
+    const days = [];
+    let day = new Date(startDate);
+    for (let i = 0; i < 42; i++) {
+        days.push(new Date(day));
+        day.setDate(day.getDate() + 1);
+    }
+    
+    return (
+        <div className="absolute top-full mt-2 bg-white border border-gray-300 rounded-lg shadow-lg z-20 p-2 w-72">
+            <div className="flex justify-between items-center mb-2 px-2">
+                <button type="button" onClick={() => setAvailabilityCalendarDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))} className="p-1 rounded-full hover:bg-gray-100">&lt;</button>
+                <h4 className="text-sm font-semibold">{monthNames[availabilityCalendarDate.getMonth()]} {availabilityCalendarDate.getFullYear()}</h4>
+                <button type="button" onClick={() => setAvailabilityCalendarDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))} className="p-1 rounded-full hover:bg-gray-100">&gt;</button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-center text-xs text-gray-500">
+                {daysOfWeek.map((day, i) => <div key={i}>{day}</div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-x-0 gap-y-1 mt-1">
+                {days.map((d, index) => {
+                    const isCurrentMonth = d.getMonth() === availabilityCalendarDate.getMonth();
+                    const dayTime = d.getTime();
+                    const startTime = availabilityFilterStartDate?.getTime();
+                    const endTime = availabilityFilterEndDate?.getTime();
+                    const hoverTime = availabilityHoverDate?.getTime();
+
+                    const isStart = startTime === dayTime;
+                    const isEnd = endTime === dayTime;
+                    const isInRange = startTime && endTime && dayTime > startTime && dayTime < endTime;
+                    
+                    const isHovering = availabilityFilterStartDate && !availabilityFilterEndDate && availabilityHoverDate && (
+                        (dayTime > startTime && dayTime <= hoverTime) ||
+                        (dayTime < startTime && dayTime >= hoverTime)
+                    );
+                    
+                    const dayIsHoverEdge = availabilityFilterStartDate && !availabilityFilterEndDate && (dayTime === hoverTime);
+
+                    return (
+                        <div
+                            key={index}
+                            onClick={() => handleAvailabilityDateClick(d)}
+                            onMouseEnter={() => setAvailabilityHoverDate(d)}
+                            onMouseLeave={() => setAvailabilityHoverDate(null)}
+                            className={`
+                                w-full aspect-square flex items-center justify-center text-xs transition-colors duration-100 cursor-pointer
+                                ${isCurrentMonth ? 'text-gray-800' : 'text-gray-300'}
+                                ${
+                                    // Background
+                                    (isStart || isEnd) ? 'bg-brand-primary text-white font-bold' :
+                                    (dayIsHoverEdge) ? 'bg-brand-primary/80 text-white' :
+                                    (isInRange || isHovering) ? 'bg-blue-100' :
+                                    'hover:bg-gray-100'
+                                } ${
+                                    // Border Radius
+                                    (isStart && isEnd) ? 'rounded-lg' : // Single day
+                                    (isStart) ? 'rounded-l-lg' :
+                                    (isEnd) ? 'rounded-r-lg' :
+                                    (dayIsHoverEdge) ? (hoverTime && startTime && hoverTime > startTime ? 'rounded-r-lg' : 'rounded-l-lg') :
+                                    (isInRange || isHovering) ? 'rounded-none' :
+                                    'rounded-lg'
+                                }
+                            `}
+                        >
+                            {d.getDate()}
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+  }
 
   const renderBikeList = () => {
     if (isLoadingBikes) {
@@ -506,20 +720,39 @@ const App: React.FC = () => {
               id="filterStatus"
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as BikeStatus | '')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary"
+              disabled={!!(availabilityFilterStartDate && availabilityFilterEndDate)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
               <option value="">Todos</option>
               {Object.values(BikeStatus).map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
         </div>
-        <div className="border-t border-gray-200 mt-4 pt-4 flex justify-end">
+        <div className="border-t border-gray-200 mt-4 pt-4 flex items-end gap-4">
+            <div className="relative" ref={availabilityFilterRef}>
+                 <label htmlFor="filterAvailability" className="block text-sm font-medium text-gray-700 mb-1">Verificar disponibilidade para reserva</label>
+                 <button
+                    id="filterAvailability"
+                    type="button"
+                    onClick={() => setIsAvailabilityCalendarOpen(!isAvailabilityCalendarOpen)}
+                    className="w-full sm:w-72 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-primary text-left bg-white flex justify-between items-center"
+                >
+                    {availabilityFilterStartDate && availabilityFilterEndDate
+                        ? <span className="text-gray-800">{`${availabilityFilterStartDate.toLocaleDateString('pt-PT')} - ${availabilityFilterEndDate.toLocaleDateString('pt-PT')}`}</span>
+                        : <span className="text-gray-500">Selecione um período...</span>
+                    }
+                    <CalendarIcon className="h-5 w-5 text-gray-400" />
+                </button>
+                {isAvailabilityCalendarOpen && renderAvailabilityCalendar()}
+            </div>
             <button
                 onClick={() => {
                 setFilterBrand('');
                 setFilterModel('');
                 setFilterSize('');
                 setFilterStatus('');
+                setAvailabilityFilterStartDate(null);
+                setAvailabilityFilterEndDate(null);
                 }}
                 className="bg-gray-200 text-gray-700 font-semibold px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
             >
@@ -588,11 +821,16 @@ const App: React.FC = () => {
                 <div>
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="text-2xl font-semibold text-gray-800">Calendário de Reservas</h3>
-                        <button onClick={() => setActiveModal('addBooking')} className="flex items-center gap-2 bg-brand-primary text-white font-semibold px-4 py-2 rounded-lg shadow-md hover:bg-brand-primary-dark transition-colors">
+                        <button onClick={() => openBookingModal(null)} className="flex items-center gap-2 bg-brand-primary text-white font-semibold px-4 py-2 rounded-lg shadow-md hover:bg-brand-primary-dark transition-colors">
                             <CalendarIcon className="h-5 w-5" /> Nova Reserva
                         </button>
                     </div>
-                    <Calendar bookings={selectedBikeBookings} bikes={bikes} />
+                    <Calendar 
+                      bookings={selectedBikeBookings} 
+                      bikes={bikes} 
+                      onEditBooking={openBookingModal} 
+                      onDeleteBooking={handleDeleteBooking}
+                    />
                 </div>
                 <div>
                     <div className="flex justify-between items-center mb-4">
@@ -860,10 +1098,11 @@ const App: React.FC = () => {
                     <table className="w-full text-sm text-left text-gray-500">
                     <thead className="text-xs text-gray-700 uppercase bg-gray-50">
                         <tr>
-                        <th scope="col" className="px-6 py-3">Bicicleta</th>
-                        <th scope="col" className="px-6 py-3">Cliente</th>
+                        <th scope="col" className="px-6 py-3">Nº Reserva</th>
                         <th scope="col" className="px-6 py-3">Data de Início</th>
                         <th scope="col" className="px-6 py-3">Data de Fim</th>
+                        <th scope="col" className="px-6 py-3">Bicicleta</th>
+                        <th scope="col" className="px-6 py-3">Ações</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -871,17 +1110,23 @@ const App: React.FC = () => {
                             const bike = bikes.find(b => b.id === booking.bikeId);
                             return (
                                 <tr key={booking.id} className="bg-white border-b hover:bg-gray-50">
+                                    <td className="px-6 py-4">{booking.bookingNumber}</td>
+                                    <td className="px-6 py-4">{new Date(booking.startDate).toLocaleDateString('pt-PT')}</td>
+                                    <td className="px-6 py-4">{new Date(booking.endDate).toLocaleDateString('pt-PT')}</td>
                                     <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
                                         {bike ? `${bike.brand} ${bike.model} (Ref: ${bike.ref_no})` : 'Bicicleta não encontrada'}
                                     </td>
-                                    <td className="px-6 py-4">{booking.customerName}</td>
-                                    <td className="px-6 py-4">{new Date(booking.startDate).toLocaleDateString('pt-PT')}</td>
-                                    <td className="px-6 py-4">{new Date(booking.endDate).toLocaleDateString('pt-PT')}</td>
+                                    <td className="px-6 py-4">
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => openBookingModal(booking)} className="text-brand-primary hover:text-brand-primary-dark"><PencilIcon className="h-5 w-5"/></button>
+                                            <button onClick={() => handleDeleteBooking(booking.id)} className="text-red-500 hover:text-red-700"><TrashIcon className="h-5 w-5"/></button>
+                                        </div>
+                                    </td>
                                 </tr>
                             );
                         }) : (
                             <tr>
-                                <td colSpan={4} className="text-center py-10 text-gray-500">
+                                <td colSpan={5} className="text-center py-10 text-gray-500">
                                     Nenhuma reserva encontrada com os filtros selecionados.
                                 </td>
                             </tr>
@@ -919,6 +1164,107 @@ const App: React.FC = () => {
       </select>
     </div>
   );
+  
+  const renderBookingDateRangePicker = () => {
+    const monthNames = [ 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro' ];
+    const daysOfWeek = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+    const startOfMonth = new Date(bookingFormCalendarDate.getFullYear(), bookingFormCalendarDate.getMonth(), 1);
+    const startDate = new Date(startOfMonth);
+    startDate.setDate(startDate.getDate() - startOfMonth.getDay());
+
+    const days = [];
+    let day = new Date(startDate);
+    for (let i = 0; i < 42; i++) {
+        days.push(new Date(day));
+        day.setDate(day.getDate() + 1);
+    }
+
+    const bikeBookings = useMemo(() => {
+        if (!selectedBike) return [];
+        return bookings.filter(b => b.bikeId === selectedBike.id && b.id !== bookingToEdit?.id);
+    }, [selectedBike, bookings, bookingToEdit]);
+      
+    const isDateBooked = (date: Date) => {
+        const checkDate = new Date(date);
+        checkDate.setHours(0, 0, 0, 0);
+        return bikeBookings.some(booking => {
+          const start = new Date(booking.startDate);
+          start.setHours(0, 0, 0, 0);
+          const end = new Date(booking.endDate);
+          end.setHours(0, 0, 0, 0);
+          return checkDate >= start && checkDate <= end;
+        });
+    };
+    
+    return (
+        <div className="p-2 border rounded-lg">
+            <div className="flex justify-between items-center mb-2 px-2">
+                <button type="button" onClick={() => setBookingFormCalendarDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))} className="p-1 rounded-full hover:bg-gray-100">&lt;</button>
+                <h4 className="text-sm font-semibold">{monthNames[bookingFormCalendarDate.getMonth()]} {bookingFormCalendarDate.getFullYear()}</h4>
+                <button type="button" onClick={() => setBookingFormCalendarDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))} className="p-1 rounded-full hover:bg-gray-100">&gt;</button>
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-center text-xs text-gray-500">
+                {daysOfWeek.map((day, i) => <div key={i}>{day}</div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-x-0 gap-y-1 mt-1">
+                {days.map((d, index) => {
+                    const isCurrentMonth = d.getMonth() === bookingFormCalendarDate.getMonth();
+                    const dayTime = d.getTime();
+                    const startTime = bookingStartDate?.getTime();
+                    const endTime = bookingEndDate?.getTime();
+                    const hoverTime = bookingHoverDate?.getTime();
+
+                    const isStart = startTime === dayTime;
+                    const isEnd = endTime === dayTime;
+                    const isInRange = startTime && endTime && dayTime > startTime && dayTime < endTime;
+                    
+                    const isHovering = bookingStartDate && !bookingEndDate && bookingHoverDate && (
+                        (dayTime > startTime && dayTime <= hoverTime) ||
+                        (dayTime < startTime && dayTime >= hoverTime)
+                    );
+                    
+                    const isBooked = isDateBooked(d);
+
+                    const dayIsHoverEdge = bookingStartDate && !bookingEndDate && (dayTime === hoverTime);
+
+                    return (
+                        <div
+                            key={index}
+                            onClick={() => !isBooked && handleDateRangePickerClick(d)}
+                            onMouseEnter={() => setBookingHoverDate(d)}
+                            onMouseLeave={() => setBookingHoverDate(null)}
+                            className={`
+                                w-full aspect-square flex items-center justify-center text-xs transition-colors duration-100
+                                ${isCurrentMonth ? 'text-gray-800' : 'text-gray-300'}
+                                ${isBooked 
+                                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed rounded-lg' 
+                                    : `cursor-pointer ${
+                                        // Background
+                                        (isStart || isEnd) ? 'bg-brand-primary text-white font-bold' :
+                                        (dayIsHoverEdge) ? 'bg-brand-primary/80 text-white' :
+                                        (isInRange || isHovering) ? 'bg-blue-100' :
+                                        'hover:bg-gray-100'
+                                    } ${
+                                        // Border Radius
+                                        (isStart && isEnd) ? 'rounded-lg' : // Single day
+                                        (isStart) ? 'rounded-l-lg' :
+                                        (isEnd) ? 'rounded-r-lg' :
+                                        (dayIsHoverEdge) ? (hoverTime && startTime && hoverTime > startTime ? 'rounded-r-lg' : 'rounded-l-lg') :
+                                        (isInRange || isHovering) ? 'rounded-none' :
+                                        'rounded-lg'
+                                    }`
+                                }
+                            `}
+                        >
+                            {d.getDate()}
+                        </div>
+                    )
+                })}
+            </div>
+        </div>
+    )
+  }
 
   const NavButton = ({ view, label, icon }: { view: 'bikes' | 'bookings', label: string, icon?: React.ReactNode }) => (
     <button 
@@ -1110,13 +1456,50 @@ const App: React.FC = () => {
         </div>
       </Modal>
 
-      <Modal isOpen={activeModal === 'addBooking'} onClose={() => setActiveModal(null)} title="Nova Reserva">
-        <form onSubmit={handleAddBooking}>
-            {renderFormInput('Nome do Cliente', 'customerName', 'text')}
-            {renderFormInput('Data de Início', 'startDate', 'date')}
-            {renderFormInput('Data de Fim', 'endDate', 'date')}
-            <button type="submit" className="w-full bg-brand-primary text-white font-semibold py-2 rounded-lg hover:bg-brand-primary-dark transition-colors">Criar Reserva</button>
+      <Modal isOpen={activeModal === 'booking'} onClose={() => setActiveModal(null)} title={bookingToEdit ? "Editar Reserva" : "Nova Reserva"}>
+        <form onSubmit={handleSaveBooking}>
+            {renderFormInput('Número da Reserva', 'bookingNumber', 'text', true, bookingToEdit?.bookingNumber || '')}
+            <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Período da Reserva</label>
+                <div className="text-center font-semibold text-brand-primary p-2 bg-blue-50 rounded-md">
+                    {bookingStartDate ? bookingStartDate.toLocaleDateString('pt-PT') : 'Selecione a data de início'}
+                    {' - '}
+                    {bookingEndDate ? bookingEndDate.toLocaleDateString('pt-PT') : 'Selecione a data de fim'}
+                </div>
+            </div>
+            {renderBookingDateRangePicker()}
+             <div className="my-4">
+                <label htmlFor="notes" className="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+                <textarea id="notes" name="notes" rows={3} defaultValue={bookingToEdit?.notes || ''} className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-brand-primary focus:border-brand-primary" placeholder="Adicionar notas..."></textarea>
+            </div>
+            <button type="submit" className="w-full bg-brand-primary text-white font-semibold py-2 rounded-lg hover:bg-brand-primary-dark transition-colors">
+                {bookingToEdit ? 'Salvar Alterações' : 'Criar Reserva'}
+            </button>
         </form>
+      </Modal>
+      
+      <Modal 
+        isOpen={confirmationModal?.isOpen ?? false} 
+        onClose={() => setConfirmationModal(null)} 
+        title={confirmationModal?.title || ''}
+      >
+        <p className="text-gray-600 mb-6">{confirmationModal?.message || ''}</p>
+        <div className="flex justify-end gap-4">
+            <button 
+                onClick={() => setConfirmationModal(null)}
+                className="px-4 py-2 rounded-lg bg-gray-200 text-gray-800 font-semibold hover:bg-gray-300 transition-colors"
+            >
+                Cancelar
+            </button>
+            <button 
+                onClick={() => {
+                    confirmationModal?.onConfirm();
+                }}
+                className="px-4 py-2 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition-colors"
+            >
+                Eliminar
+            </button>
+        </div>
       </Modal>
 
     </div>

@@ -36,5 +36,6 @@ export interface Booking {
   bikeId: string;
   startDate: Date;
   endDate: Date;
-  customerName: string;
+  bookingNumber: string;
+  notes?: string;
 }

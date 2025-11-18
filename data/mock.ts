@@ -14,8 +14,8 @@ export const initialMaintenance: MaintenanceRecord[] = [
 ];
 
 export const initialBookings: Booking[] = [
-    { id: 'book-1', bikeId: 'bike-2', customerName: 'João Silva', startDate: new Date('2025-11-17'), endDate: new Date('2025-11-19')},
-    { id: 'book-2', bikeId: 'bike-1', customerName: 'Maria Oliveira', startDate: new Date('2025-11-22'), endDate: new Date('2025-11-24') },
-    { id: 'book-3', bikeId: 'bike-4', customerName: 'Carlos Pereira', startDate: new Date('2025-11-07'), endDate: new Date('2025-11-09') },
-    { id: 'book-4', bikeId: 'bike-1', customerName: 'Ana Costa', startDate: new Date('2025-11-27'), endDate: new Date('2025-11-29') },
+    { id: 'book-1', bikeId: 'bike-2', bookingNumber: 'R-001', startDate: new Date('2025-11-17'), endDate: new Date('2025-11-19'), notes: 'Cliente frequente.'},
+    { id: 'book-2', bikeId: 'bike-1', bookingNumber: 'R-002', startDate: new Date('2025-11-22'), endDate: new Date('2025-11-24'), notes: '' },
+    { id: 'book-3', bikeId: 'bike-4', bookingNumber: 'R-003', startDate: new Date('2025-11-07'), endDate: new Date('2025-11-09'), notes: 'Pedido de selim de gel.' },
+    { id: 'book-4', bikeId: 'bike-1', bookingNumber: 'R-004', startDate: new Date('2025-11-27'), endDate: new Date('2025-11-29'), notes: '' },
 ];

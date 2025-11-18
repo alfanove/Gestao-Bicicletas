@@ -1,16 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { Booking, Bike } from '../types';
+import { PencilIcon, TrashIcon } from './Icons';
 
 interface CalendarProps {
   bookings: Booking[];
   bikes: Bike[];
+  onEditBooking?: (booking: Booking) => void;
+  onDeleteBooking?: (bookingId: string) => void;
 }
 
-const Calendar: React.FC<CalendarProps> = ({ bookings, bikes }) => {
+const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onDeleteBooking }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   // FIX: Add viewMode state to control calendar display (map or list).
-  const [viewMode, setViewMode] = useState<'list' | 'map'>('map');
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
   const daysOfWeek = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const monthNames = [
@@ -145,7 +148,7 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes }) => {
             <ul className="space-y-2">
               {bookingsForSelectedDate.map(booking => (
                 <li key={booking.id} className="bg-gray-50 p-3 rounded-md">
-                  <p className="font-semibold text-gray-900">{booking.customerName}</p>
+                  <p className="font-semibold text-gray-900">{booking.bookingNumber}</p>
                   <p className="text-sm text-gray-600">
                     {new Date(booking.startDate).toLocaleDateString('pt-PT')} - {new Date(booking.endDate).toLocaleDateString('pt-PT')}
                   </p>
@@ -166,11 +169,19 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes }) => {
     return (
         <div className="space-y-3">
             {sortedBookings.length > 0 ? sortedBookings.map(booking => (
-                 <div key={booking.id} className="bg-gray-50 p-3 rounded-md">
-                    <p className="font-semibold text-gray-900">{booking.customerName}</p>
-                    <p className="text-sm text-gray-600">
-                      {new Date(booking.startDate).toLocaleDateString('pt-PT')} - {new Date(booking.endDate).toLocaleDateString('pt-PT')}
-                    </p>
+                 <div key={booking.id} className="bg-gray-50 p-3 rounded-md flex justify-between items-center">
+                    <div>
+                        <p className="font-semibold text-gray-900">{booking.bookingNumber}</p>
+                        <p className="text-sm text-gray-600">
+                        {new Date(booking.startDate).toLocaleDateString('pt-PT')} - {new Date(booking.endDate).toLocaleDateString('pt-PT')}
+                        </p>
+                    </div>
+                    {onEditBooking && onDeleteBooking && (
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => onEditBooking(booking)} className="text-brand-primary hover:text-brand-primary-dark"><PencilIcon className="h-5 w-5"/></button>
+                            <button onClick={() => onDeleteBooking(booking.id)} className="text-red-500 hover:text-red-700"><TrashIcon className="h-5 w-5"/></button>
+                        </div>
+                    )}
                 </div>
             )) : (
                 <p className="text-gray-500 text-sm py-4">Nenhuma reserva agendada.</p>
