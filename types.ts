@@ -1,3 +1,4 @@
+
 export enum BikeStatus {
   AVAILABLE = 'Disponível',
   RENTED = 'Alugada',
@@ -11,8 +12,8 @@ export interface Bike {
   model: string;
   size: 'S' | 'M' | 'L' | 'XL';
   status: BikeStatus;
-  entryDate: Date;
-  imageUrl: string;
+  entry_date: string; // Changed from Date to string to match DB format 'YYYY-MM-DD'
+  image_url: string;
 }
 
 export enum MaintenanceStatus {
@@ -22,20 +23,20 @@ export enum MaintenanceStatus {
 
 export interface MaintenanceRecord {
   id: string;
-  bikeId: string;
+  bike_id: string;
   description: string;
   tasks: string[];
-  reportedDate: Date;
-  resolvedDate?: Date;
+  reported_date: Date;
+  resolved_date?: Date;
   status: MaintenanceStatus;
-  workshopNotes?: string;
+  workshop_notes?: string;
 }
 
 export interface Booking {
   id: string;
-  bikeId: string;
-  startDate: Date;
-  endDate: Date;
-  bookingNumber: string;
+  bike_id: string;
+  start_date: string; // Changed from Date to string
+  end_date: string; // Changed from Date to string
+  booking_number: string;
   notes?: string;
 }

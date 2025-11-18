@@ -1,36 +1,10 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Bike, BikeStatus, MaintenanceRecord, MaintenanceStatus, Booking } from './types';
 import { PlusIcon, WrenchIcon, CalendarIcon, ArrowLeftIcon, TrashIcon, PencilIcon, BellIcon } from './components/Icons';
 import Modal from './components/Modal';
 import Calendar from './components/Calendar';
-import { initialBikes, initialMaintenance, initialBookings } from './data/mock';
-
-// Helper function to load data from localStorage
-// FIX: Disambiguated generic type parameter from JSX tag. In a .tsx file, <T> can be misinterpreted as a JSX tag. Adding a trailing comma, <T,>, clarifies that it's a generic type parameter, resolving a cascade of parsing errors throughout the file.
-const loadFromLocalStorage = <T,>(key: string, fallbackData: any[], reviver?: (key: string, value: any) => any): T[] => {
-  try {
-    const storedData = localStorage.getItem(key);
-    if (storedData) {
-      // The reviver function is crucial to convert date strings back to Date objects
-      return JSON.parse(storedData, reviver);
-    }
-  } catch (error) {
-    console.error(`Error reading ${key} from localStorage`, error);
-  }
-  return fallbackData;
-};
-
-// Reviver function to parse dates correctly from JSON
-const dateReviver = (key: string, value: any) => {
-  const dateKeys = ['entryDate', 'reportedDate', 'resolvedDate', 'startDate', 'endDate'];
-  if (dateKeys.includes(key) && typeof value === 'string') {
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) {
-      return date;
-    }
-  }
-  return value;
-};
+import { supabase } from './lib/supabaseClient';
 
 
 const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
@@ -57,13 +31,41 @@ const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
 }
 
 const App: React.FC = () => {
-    // Initialize state from localStorage or fallback to mock data
-  const [bikes, setBikes] = useState<Bike[]>(() => loadFromLocalStorage<Bike>('bikes', initialBikes, dateReviver));
-  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(() => loadFromLocalStorage<MaintenanceRecord>('maintenanceRecords', initialMaintenance, dateReviver));
-  const [bookings, setBookings] = useState<Booking[]>(() => loadFromLocalStorage<Booking>('bookings', initialBookings, dateReviver));
-  const [isLoadingBikes, setIsLoadingBikes] = useState(false); // No longer loading from API
+  const [bikes, setBikes] = useState<Bike[]>([]);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
+  // Fetch initial data from Supabase
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const { data: bikesData, error: bikesError } = await supabase.from('bikes').select('*').order('created_at', { ascending: false });
+        if (bikesError) throw bikesError;
+        setBikes(bikesData || []);
+        
+        const { data: maintData, error: maintError } = await supabase.from('maintenance_records').select('*').returns<MaintenanceRecord[]>();
+        if (maintError) throw maintError;
+        setMaintenanceRecords(maintData.map(m => ({...m, reported_date: new Date(m.reported_date), resolved_date: m.resolved_date ? new Date(m.resolved_date) : undefined })) || []);
+
+        const { data: bookingsData, error: bookingsError } = await supabase.from('bookings').select('*');
+        if (bookingsError) throw bookingsError;
+        setBookings(bookingsData || []);
+
+      } catch (err: any) {
+        setError(`Erro ao carregar dados: ${err.message}`);
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
   // State for confirmation modal
   const [confirmationModal, setConfirmationModal] = useState<{ 
     isOpen: boolean; 
@@ -72,18 +74,6 @@ const App: React.FC = () => {
     onConfirm: () => void; 
   } | null>(null);
 
-  // Effect to save data to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('bikes', JSON.stringify(bikes));
-      localStorage.setItem('maintenanceRecords', JSON.stringify(maintenanceRecords));
-      localStorage.setItem('bookings', JSON.stringify(bookings));
-    } catch (error) {
-      console.error("Error saving data to localStorage", error);
-      setError("Não foi possível guardar as alterações no navegador. O armazenamento pode estar cheio.");
-    }
-  }, [bikes, maintenanceRecords, bookings]);
-  
   const brands = useMemo(() => [...new Set(bikes.map(b => b.brand))].sort(), [bikes]);
   const models = useMemo(() => [...new Set(bikes.map(b => b.model))].sort(), [bikes]);
 
@@ -92,6 +82,7 @@ const App: React.FC = () => {
   const [activeModal, setActiveModal] = useState<'addBike' | 'editBike' | 'reportFault' | 'maintenanceProcess' | 'manageTaskTypes' | 'booking' | null>(null);
   const [bikeToEdit, setBikeToEdit] = useState<Bike | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   // State for bike filters
   const [filterStatus, setFilterStatus] = useState<BikeStatus | ''>('');
@@ -168,9 +159,9 @@ const App: React.FC = () => {
     return maintenanceRecords
       .filter(m => m.status === MaintenanceStatus.PENDING)
       .map(m => {
-        const bike = bikes.find(b => b.id === m.bikeId);
+        const bike = bikes.find(b => b.id === m.bike_id);
         if (!bike) return null;
-        const daysDiff = Math.floor((now.getTime() - new Date(m.reportedDate).getTime()) / (1000 * 3600 * 24));
+        const daysDiff = Math.floor((now.getTime() - new Date(m.reported_date).getTime()) / (1000 * 3600 * 24));
         if (daysDiff <= OVERDUE_DAYS_THRESHOLD) return null;
 
         return {
@@ -206,11 +197,11 @@ const App: React.FC = () => {
 
 
   const selectedBikeMaintenance = useMemo(() => {
-    return maintenanceRecords.filter(m => m.bikeId === selectedBike?.id).sort((a, b) => b.reportedDate.getTime() - a.reportedDate.getTime());
+    return maintenanceRecords.filter(m => m.bike_id === selectedBike?.id).sort((a, b) => new Date(b.reported_date).getTime() - new Date(a.reported_date).getTime());
   }, [maintenanceRecords, selectedBike]);
 
   const selectedBikeBookings = useMemo(() => {
-    return bookings.filter(b => b.bikeId === selectedBike?.id);
+    return bookings.filter(b => b.bike_id === selectedBike?.id);
   }, [bookings, selectedBike]);
   
   const filteredBikes = useMemo(() => {
@@ -221,11 +212,11 @@ const App: React.FC = () => {
             }
 
             const hasOverlappingBooking = bookings.some(booking => {
-                if (booking.bikeId !== bike.id) return false;
+                if (booking.bike_id !== bike.id) return false;
 
-                const bookingStart = new Date(booking.startDate);
+                const bookingStart = new Date(booking.start_date);
                 bookingStart.setHours(0, 0, 0, 0);
-                const bookingEnd = new Date(booking.endDate);
+                const bookingEnd = new Date(booking.end_date);
                 bookingEnd.setHours(0, 0, 0, 0);
 
                 const filterStart = new Date(availabilityFilterStartDate);
@@ -253,20 +244,20 @@ const App: React.FC = () => {
 
   const filteredBookings = useMemo(() => {
     return bookings.filter(booking => {
-        if (bookingFilterId && !booking.bookingNumber.toLowerCase().includes(bookingFilterId.toLowerCase())) {
+        if (bookingFilterId && !booking.booking_number.toLowerCase().includes(bookingFilterId.toLowerCase())) {
             return false;
         }
 
-        const bike = bikes.find(b => b.id === booking.bikeId);
+        const bike = bikes.find(b => b.id === booking.bike_id);
         if (!bike) return false;
 
         if (bookingFilterBrand && bike.brand !== bookingFilterBrand) return false;
         if (bookingFilterModel && bike.model !== bookingFilterModel) return false;
         if (bookingFilterSize && bike.size !== bookingFilterSize) return false;
 
-        const bookingStart = new Date(booking.startDate);
+        const bookingStart = new Date(booking.start_date);
         bookingStart.setHours(0,0,0,0);
-        const bookingEnd = new Date(booking.endDate);
+        const bookingEnd = new Date(booking.end_date);
         bookingEnd.setHours(0,0,0,0);
 
         if (bookingFilterStartDate) {
@@ -278,13 +269,14 @@ const App: React.FC = () => {
             if (bookingStart > filterEnd) return false;
         }
         return true;
-    }).sort((a,b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+    }).sort((a,b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
   }, [bookings, bookingFilterId, bookingFilterStartDate, bookingFilterEndDate, bookingFilterBrand, bookingFilterModel, bookingFilterSize, bikes]);
 
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
@@ -292,128 +284,241 @@ const App: React.FC = () => {
       reader.readAsDataURL(file);
     }
   };
+  
+  const uploadBikeImage = async (): Promise<string | null> => {
+    if (!imageFile) return null;
+    const fileName = `${Date.now()}_${imageFile.name}`;
+    const { error: uploadError } = await supabase.storage
+        .from('bike-images')
+        .upload(fileName, imageFile);
+    
+    if (uploadError) {
+        setError(`Erro no upload da imagem: ${uploadError.message}`);
+        return null;
+    }
+    
+    const { data } = supabase.storage.from('bike-images').getPublicUrl(fileName);
+    return data.publicUrl;
+  };
 
-  const handleAddBike = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddBike = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
 
-    const newBike: Bike = {
-      id: `bike-${Date.now()}`,
+    let imageUrl = `https://picsum.photos/seed/bike${Date.now()}/400/300`;
+    if (imageFile) {
+        const uploadedUrl = await uploadBikeImage();
+        if (uploadedUrl) {
+            imageUrl = uploadedUrl;
+        } else {
+            return; // Error was already set in uploadBikeImage
+        }
+    }
+    
+    const bikeData = {
       ref_no: (form.elements.namedItem('ref_no') as HTMLInputElement).value,
       brand: (form.elements.namedItem('brand') as HTMLInputElement).value.trim(),
       model: (form.elements.namedItem('model') as HTMLInputElement).value.trim(),
-      size: (form.elements.namedItem('size') as HTMLSelectElement).value as 'S' | 'M' | 'L' | 'XL',
-      entryDate: new Date((form.elements.namedItem('entryDate') as HTMLInputElement).value),
+      size: (form.elements.namedItem('size') as HTMLSelectElement).value,
+      entry_date: (form.elements.namedItem('entry_date') as HTMLInputElement).value,
       status: BikeStatus.AVAILABLE,
-      imageUrl: imagePreview || `https://picsum.photos/seed/bike${Date.now()}/400/300`,
+      image_url: imageUrl,
     };
 
-    setBikes([newBike, ...bikes]);
-    setActiveModal(null);
+    const { data: newBike, error } = await supabase.from('bikes').insert(bikeData).select().single();
+    
+    if (error) {
+        setError(`Erro ao adicionar bicicleta: ${error.message}`);
+    } else if (newBike) {
+        setBikes(prev => [newBike, ...prev]);
+        setActiveModal(null);
+    }
   };
   
-  const handleEditBike = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleEditBike = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!bikeToEdit) return;
     const form = e.currentTarget;
 
-    const updatedBike: Bike = {
-        ...bikeToEdit,
+    let imageUrl = bikeToEdit.image_url;
+    if (imageFile && imagePreview !== bikeToEdit.image_url) {
+        const uploadedUrl = await uploadBikeImage();
+        if (uploadedUrl) {
+            imageUrl = uploadedUrl;
+            // Optionally, delete old image from storage
+            if (bikeToEdit.image_url.includes('supabase')) {
+                const oldFileName = bikeToEdit.image_url.split('/').pop();
+                if (oldFileName) {
+                    await supabase.storage.from('bike-images').remove([oldFileName]);
+                }
+            }
+        } else {
+            return; // Error occurred during upload
+        }
+    }
+
+    const updatedData = {
         ref_no: (form.elements.namedItem('ref_no') as HTMLInputElement).value,
         brand: (form.elements.namedItem('brand') as HTMLInputElement).value.trim(),
         model: (form.elements.namedItem('model') as HTMLInputElement).value.trim(),
-        size: (form.elements.namedItem('size') as HTMLSelectElement).value as 'S' | 'M' | 'L' | 'XL',
-        entryDate: new Date((form.elements.namedItem('entryDate') as HTMLInputElement).value),
+        size: (form.elements.namedItem('size') as HTMLSelectElement).value,
+        entry_date: (form.elements.namedItem('entry_date') as HTMLInputElement).value,
         status: (form.elements.namedItem('status') as HTMLSelectElement).value as BikeStatus,
-        imageUrl: imagePreview || bikeToEdit.imageUrl,
+        image_url: imageUrl,
     };
     
-    setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
-    if (selectedBike?.id === updatedBike.id) {
-        setSelectedBike(updatedBike);
+    const { data: updatedBike, error } = await supabase.from('bikes').update(updatedData).eq('id', bikeToEdit.id).select().single();
+
+    if (error) {
+        setError(`Erro ao editar bicicleta: ${error.message}`);
+    } else if (updatedBike) {
+        setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+        if (selectedBike?.id === updatedBike.id) {
+            setSelectedBike(updatedBike);
+        }
+        setActiveModal(null);
+        setBikeToEdit(null);
     }
-    setActiveModal(null);
-    setBikeToEdit(null);
   };
 
-  const handleDeleteBike = (bikeId: string) => {
+  const handleDeleteBike = (bike: Bike) => {
     setConfirmationModal({
         isOpen: true,
         title: "Confirmar Eliminação",
-        message: "Tem a certeza que deseja remover esta bicicleta? Todos os registos de manutenção e reservas associados serão também eliminados.",
-        onConfirm: () => {
-            setBikes(bikes.filter(b => b.id !== bikeId));
-            setMaintenanceRecords(maintenanceRecords.filter(m => m.bikeId !== bikeId));
-            setBookings(bookings.filter(b => b.bikeId !== bikeId));
-            if(selectedBike?.id === bikeId) setSelectedBike(null);
+        message: "Tem a certeza que deseja remover esta bicicleta? Todos os registos associados (manutenção, reservas) serão também eliminados.",
+        onConfirm: async () => {
+            // Delete image from storage first
+            if (bike.image_url.includes('supabase')) {
+                const fileName = bike.image_url.split('/').pop();
+                if (fileName) {
+                    const { error: storageError } = await supabase.storage.from('bike-images').remove([fileName]);
+                    if (storageError) {
+                         setError(`Erro ao apagar imagem: ${storageError.message}`);
+                         // Don't proceed if image deletion fails, to avoid orphans
+                         setConfirmationModal(null);
+                         return;
+                    }
+                }
+            }
+
+            // DB will cascade delete bookings and maintenance records
+            const { error } = await supabase.from('bikes').delete().eq('id', bike.id);
+            if (error) {
+                setError(`Erro ao apagar bicicleta: ${error.message}`);
+            } else {
+                setBikes(bikes.filter(b => b.id !== bike.id));
+                // No need to manually filter maintenance/bookings due to CASCADE
+                if(selectedBike?.id === bike.id) setSelectedBike(null);
+            }
             setConfirmationModal(null);
         }
     });
   };
 
-  const handleReportFault = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleReportFault = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedBike) return;
 
     const description = (e.currentTarget.elements.namedItem('faultDescription') as HTMLTextAreaElement).value;
-    const newRecord: MaintenanceRecord = {
-      id: `maint-${Date.now()}`,
-      bikeId: selectedBike.id,
+    const newRecordData = {
+      bike_id: selectedBike.id,
       description: description,
       tasks: [],
-      workshopNotes: '',
-      reportedDate: new Date(),
+      workshop_notes: '',
+      reported_date: new Date().toISOString(),
       status: MaintenanceStatus.PENDING,
     };
-    setMaintenanceRecords([newRecord, ...maintenanceRecords]);
-    setBikes(bikes.map(b => b.id === selectedBike.id ? { ...b, status: BikeStatus.MAINTENANCE } : b));
-    setSelectedBike(prev => prev ? {...prev, status: BikeStatus.MAINTENANCE} : null);
     
-    setActiveModal(null);
+    const { data: newRecord, error: insertError } = await supabase.from('maintenance_records').insert(newRecordData).select().single();
+    if (insertError) {
+        setError(`Erro ao reportar avaria: ${insertError.message}`);
+        return;
+    }
+
+    const { data: updatedBike, error: updateError } = await supabase.from('bikes').update({ status: BikeStatus.MAINTENANCE }).eq('id', selectedBike.id).select().single();
+    if (updateError) {
+        setError(`Erro ao atualizar estado da bicicleta: ${updateError.message}`);
+        return;
+    }
+
+    if (newRecord && updatedBike) {
+        setMaintenanceRecords(prev => [{...newRecord, reported_date: new Date(newRecord.reported_date), resolved_date: undefined}, ...prev]);
+        setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+        setSelectedBike(updatedBike);
+        setActiveModal(null);
+    }
   };
   
-  const handleStartMaintenance = () => {
+  const handleStartMaintenance = async () => {
       if (!selectedBike) return;
-      const newRecord: MaintenanceRecord = {
-        id: `maint-${Date.now()}`,
-        bikeId: selectedBike.id,
+      const newRecordData = {
+        bike_id: selectedBike.id,
         description: "Manutenção de rotina iniciada pela oficina.",
         tasks: [],
-        workshopNotes: '',
-        reportedDate: new Date(),
+        workshop_notes: '',
+        reported_date: new Date().toISOString(),
         status: MaintenanceStatus.PENDING,
       };
-      setMaintenanceRecords([newRecord, ...maintenanceRecords]);
-      setBikes(bikes.map(b => b.id === selectedBike.id ? { ...b, status: BikeStatus.MAINTENANCE } : b));
-      setSelectedBike(prev => prev ? {...prev, status: BikeStatus.MAINTENANCE} : null);
-      openMaintenanceProcessModal(newRecord);
+
+      const { data: newRecord, error: insertError } = await supabase.from('maintenance_records').insert(newRecordData).select().single();
+      if (insertError) {
+          setError(`Erro ao iniciar manutenção: ${insertError.message}`);
+          return;
+      }
+
+      const { data: updatedBike, error: updateError } = await supabase.from('bikes').update({ status: BikeStatus.MAINTENANCE }).eq('id', selectedBike.id).select().single();
+       if (updateError) {
+        setError(`Erro ao atualizar estado da bicicleta: ${updateError.message}`);
+        return;
+      }
+      
+      if (newRecord && updatedBike) {
+          const formattedRecord = {...newRecord, reported_date: new Date(newRecord.reported_date), resolved_date: undefined };
+          setMaintenanceRecords(prev => [formattedRecord, ...prev]);
+          setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+          setSelectedBike(updatedBike);
+          openMaintenanceProcessModal(formattedRecord);
+      }
   };
 
   const openMaintenanceProcessModal = (record: MaintenanceRecord) => {
     setMaintenanceRecordToProcess(record);
     setCurrentEditingTasks(record.tasks);
-    setCurrentWorkshopNotes(record.workshopNotes || '');
+    setCurrentWorkshopNotes(record.workshop_notes || '');
     setTaskToAdd('');
     setActiveModal('maintenanceProcess');
   };
   
-  const handleSaveMaintenanceProcess = (conclude: boolean) => {
+  const handleSaveMaintenanceProcess = async (conclude: boolean) => {
     if (!maintenanceRecordToProcess) return;
 
-    const updatedRecord = { 
-        ...maintenanceRecordToProcess, 
+    const updatedRecordData = { 
         tasks: currentEditingTasks,
-        workshopNotes: currentWorkshopNotes,
-        ...(conclude && { status: MaintenanceStatus.RESOLVED, resolvedDate: new Date() })
+        workshop_notes: currentWorkshopNotes,
+        ...(conclude && { status: MaintenanceStatus.RESOLVED, resolved_date: new Date().toISOString() })
     };
 
-    setMaintenanceRecords(maintenanceRecords.map(m => m.id === updatedRecord.id ? updatedRecord : m));
+    const { data: updatedRecord, error } = await supabase.from('maintenance_records').update(updatedRecordData).eq('id', maintenanceRecordToProcess.id).select().single();
+    if (error) {
+        setError(`Erro ao salvar manutenção: ${error.message}`);
+        return;
+    }
+    
+    if (updatedRecord) {
+        const formattedRecord = {...updatedRecord, reported_date: new Date(updatedRecord.reported_date), resolved_date: updatedRecord.resolved_date ? new Date(updatedRecord.resolved_date) : undefined };
+        setMaintenanceRecords(maintenanceRecords.map(m => m.id === formattedRecord.id ? formattedRecord : m));
+    }
 
     if (conclude) {
-        const hasOtherPending = maintenanceRecords.some(m => m.bikeId === updatedRecord.bikeId && m.status === MaintenanceStatus.PENDING && m.id !== updatedRecord.id);
+        const hasOtherPending = maintenanceRecords.some(m => m.bike_id === maintenanceRecordToProcess.bike_id && m.status === MaintenanceStatus.PENDING && m.id !== maintenanceRecordToProcess.id);
         if (!hasOtherPending) {
-            setBikes(bikes.map(b => b.id === updatedRecord.bikeId ? { ...b, status: BikeStatus.AVAILABLE } : b));
-            setSelectedBike(prev => prev && prev.id === updatedRecord.bikeId ? {...prev, status: BikeStatus.AVAILABLE} : prev);
+            const { data: updatedBike, error: bikeError } = await supabase.from('bikes').update({ status: BikeStatus.AVAILABLE }).eq('id', maintenanceRecordToProcess.bike_id).select().single();
+            if (bikeError) {
+                 setError(`Erro ao atualizar estado da bicicleta: ${bikeError.message}`);
+            } else if (updatedBike) {
+                setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+                setSelectedBike(prev => prev && prev.id === updatedBike.id ? updatedBike : prev);
+            }
         }
     }
     setActiveModal(null);
@@ -441,11 +546,12 @@ const App: React.FC = () => {
   
   const handleRemoveTaskType = (taskToRemove: string) => {
       setMaintenanceTaskOptions(prev => prev.filter(task => task !== taskToRemove));
-      // Also remove from any current editing session
       setCurrentEditingTasks(prev => prev.filter(task => task !== taskToRemove));
   };
 
-  const handleSaveBooking = (e: React.FormEvent<HTMLFormElement>) => {
+  const toYYYYMMDD = (date: Date) => date.toISOString().split('T')[0];
+
+  const handleSaveBooking = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!bookingStartDate || !bookingEndDate) {
       alert("Por favor, selecione uma data de início e de fim.");
@@ -458,21 +564,29 @@ const App: React.FC = () => {
 
     const formData = new FormData(e.currentTarget);
     const bookingData = {
-      bookingNumber: formData.get('bookingNumber') as string,
+      booking_number: formData.get('bookingNumber') as string,
       notes: formData.get('notes') as string,
-      startDate: bookingStartDate,
-      endDate: bookingEndDate,
-      bikeId: selectedBike.id,
+      start_date: toYYYYMMDD(bookingStartDate),
+      end_date: toYYYYMMDD(bookingEndDate),
+      bike_id: selectedBike.id,
     };
 
     if (bookingToEdit) {
       // Editing existing booking
-      const updatedBooking: Booking = { ...bookingToEdit, ...bookingData };
-      setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
+      const { data: updatedBooking, error } = await supabase.from('bookings').update(bookingData).eq('id', bookingToEdit.id).select().single();
+      if (error) {
+          setError(`Erro ao editar reserva: ${error.message}`);
+      } else if (updatedBooking) {
+          setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
+      }
     } else {
       // Adding new booking
-      const newBooking: Booking = { ...bookingData, id: `book-${Date.now()}` };
-      setBookings([newBooking, ...bookings]);
+      const { data: newBooking, error } = await supabase.from('bookings').insert(bookingData).select().single();
+      if (error) {
+          setError(`Erro ao criar reserva: ${error.message}`);
+      } else if (newBooking) {
+          setBookings([newBooking, ...bookings]);
+      }
     }
     
     setActiveModal(null);
@@ -483,9 +597,14 @@ const App: React.FC = () => {
         isOpen: true,
         title: "Confirmar Eliminação",
         message: "Tem a certeza que deseja remover esta reserva? Esta ação não pode ser desfeita.",
-        onConfirm: () => {
-            setBookings(bookings.filter(b => b.id !== bookingId));
-            setConfirmationModal(null); // Close modal after action
+        onConfirm: async () => {
+            const { error } = await supabase.from('bookings').delete().eq('id', bookingId);
+            if (error) {
+                setError(`Erro ao apagar reserva: ${error.message}`);
+            } else {
+                setBookings(bookings.filter(b => b.id !== bookingId));
+            }
+            setConfirmationModal(null);
         }
     });
   };
@@ -493,9 +612,9 @@ const App: React.FC = () => {
   const openBookingModal = (booking: Booking | null) => {
     setBookingToEdit(booking);
     if (booking) {
-      setBookingStartDate(new Date(booking.startDate));
-      setBookingEndDate(new Date(booking.endDate));
-      setBookingFormCalendarDate(new Date(booking.startDate));
+      setBookingStartDate(new Date(booking.start_date));
+      setBookingEndDate(new Date(booking.end_date));
+      setBookingFormCalendarDate(new Date(booking.start_date));
     } else {
       setBookingStartDate(null);
       setBookingEndDate(null);
@@ -522,12 +641,14 @@ const App: React.FC = () => {
 
   const openAddModal = () => {
     setImagePreview(null);
+    setImageFile(null);
     setActiveModal('addBike');
   };
 
   const openEditModal = (bike: Bike) => {
     setBikeToEdit(bike);
-    setImagePreview(bike.imageUrl);
+    setImagePreview(bike.image_url);
+    setImageFile(null);
     setActiveModal('editBike');
   };
 
@@ -629,20 +750,20 @@ const App: React.FC = () => {
   }
 
   const renderBikeList = () => {
-    if (isLoadingBikes) {
+    if (isLoading) {
         return (
             <div className="p-4 sm:p-6 lg:p-8">
                 <div className="flex justify-between items-center mb-6">
                     <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
                     <div className="flex items-center gap-4">
-                        <button onClick={openAddModal} className="flex items-center gap-2 bg-brand-primary text-white font-bold px-4 py-2 rounded-lg shadow-md hover:bg-brand-primary-dark transition-colors">
+                        <button disabled className="flex items-center gap-2 bg-brand-primary/50 text-white font-bold px-4 py-2 rounded-lg cursor-not-allowed">
                             <PlusIcon className="h-5 w-5" />
                             <span>Adicionar Bicicleta</span>
                         </button>
                     </div>
                 </div>
                 <div className="text-center py-20 text-gray-500">
-                    <p>A carregar bicicletas...</p>
+                    <p>A carregar bicicletas da base de dados...</p>
                 </div>
             </div>
         );
@@ -764,7 +885,7 @@ const App: React.FC = () => {
       <div className="space-y-4">
         {filteredBikes.length > 0 ? filteredBikes.map(bike => (
             <div key={bike.id} onClick={() => setSelectedBike(bike)} className="bg-white rounded-lg shadow p-4 flex items-center space-x-4 hover:shadow-lg hover:ring-2 hover:ring-brand-primary transition-all duration-200 cursor-pointer">
-                <img className="h-20 w-24 rounded-md object-cover flex-shrink-0" src={bike.imageUrl} alt={`${bike.brand} ${bike.model}`} />
+                <img className="h-20 w-24 rounded-md object-cover flex-shrink-0" src={bike.image_url} alt={`${bike.brand} ${bike.model}`} />
                 <div className="flex-1 min-w-0">
                     <p className="text-lg font-bold text-gray-800 truncate">{bike.brand}</p>
                     <p className="text-sm text-gray-600 truncate">{bike.model}</p>
@@ -798,19 +919,19 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-1">
                 <div className="bg-white p-6 rounded-lg shadow-lg">
-                    <img src={selectedBike.imageUrl} alt={`${selectedBike.brand} ${selectedBike.model}`} className="w-full h-64 object-cover rounded-lg mb-4" />
+                    <img src={selectedBike.image_url} alt={`${selectedBike.brand} ${selectedBike.model}`} className="w-full h-64 object-cover rounded-lg mb-4" />
                     <div className="flex justify-between items-center">
                         <h2 className="text-3xl font-bold text-gray-900">{selectedBike.brand} {selectedBike.model}</h2>
                         <BikeStatusBadge status={selectedBike.status} />
                     </div>
                      <p className="text-lg text-gray-600">Tamanho: {selectedBike.size}</p>
                     <p className="text-md text-gray-500">Ref: {selectedBike.ref_no}</p>
-                    <p className="text-sm text-gray-400 mt-2">Data de Entrada: {selectedBike.entryDate.toLocaleDateString()}</p>
+                    <p className="text-sm text-gray-400 mt-2">Data de Entrada: {new Date(selectedBike.entry_date).toLocaleDateString()}</p>
                     <div className="flex items-center gap-2 mt-6">
                         <button onClick={() => openEditModal(selectedBike)} className="flex-1 flex items-center justify-center gap-2 bg-gray-200 text-gray-800 font-semibold px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">
                             <PencilIcon className="h-5 w-5" /> Editar
                         </button>
-                         <button onClick={() => handleDeleteBike(selectedBike.id)} className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-600 transition-colors">
+                         <button onClick={() => handleDeleteBike(selectedBike)} className="flex-1 flex items-center justify-center gap-2 bg-red-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-red-600 transition-colors">
                             <TrashIcon className="h-5 w-5" /> Remover
                         </button>
                     </div>
@@ -852,10 +973,10 @@ const App: React.FC = () => {
                                          <p className="text-sm font-medium text-gray-500">Problema Reportado:</p>
                                          <p className="text-gray-800 mb-2">{m.description}</p>
                                          
-                                        {m.workshopNotes && (
+                                        {m.workshop_notes && (
                                             <>
                                                 <p className="text-sm font-medium text-gray-500 mt-2">Trabalho Realizado:</p>
-                                                <p className="text-gray-800">{m.workshopNotes}</p>
+                                                <p className="text-gray-800">{m.workshop_notes}</p>
                                             </>
                                         )}
 
@@ -866,8 +987,8 @@ const App: React.FC = () => {
                                                 ))}
                                             </div>
                                         )}
-                                        <p className="text-sm text-gray-500 mt-2">Reportado em: {m.reportedDate.toLocaleDateString()}</p>
-                                        {m.resolvedDate && <p className="text-sm text-gray-500">Resolvido em: {m.resolvedDate.toLocaleDateString()}</p>}
+                                        <p className="text-sm text-gray-500 mt-2">Reportado em: {new Date(m.reported_date).toLocaleDateString()}</p>
+                                        {m.resolved_date && <p className="text-sm text-gray-500">Resolvido em: {new Date(m.resolved_date).toLocaleDateString()}</p>}
                                     </div>
                                     <div className="text-right ml-4 flex flex-col items-end">
                                         <span className={`px-2 py-1 text-xs font-semibold rounded-full ${m.status === MaintenanceStatus.PENDING ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{m.status}</span>
@@ -913,13 +1034,13 @@ const App: React.FC = () => {
 
         const modelsOnDate = filteredBookings
             .filter(booking => {
-                const bookingStart = new Date(booking.startDate);
+                const bookingStart = new Date(booking.start_date);
                 bookingStart.setHours(0, 0, 0, 0);
-                const bookingEnd = new Date(booking.endDate);
+                const bookingEnd = new Date(booking.end_date);
                 bookingEnd.setHours(0, 0, 0, 0);
                 return checkDate >= bookingStart && checkDate <= bookingEnd;
             })
-            .map(booking => bikes.find(b => b.id === booking.bikeId)?.model)
+            .map(booking => bikes.find(b => b.id === booking.bike_id)?.model)
             .filter((model): model is string => !!model);
 
         if (modelsOnDate.length === 0) {
@@ -1107,12 +1228,12 @@ const App: React.FC = () => {
                     </thead>
                     <tbody>
                         {filteredBookings.length > 0 ? filteredBookings.map(booking => {
-                            const bike = bikes.find(b => b.id === booking.bikeId);
+                            const bike = bikes.find(b => b.id === booking.bike_id);
                             return (
                                 <tr key={booking.id} className="bg-white border-b hover:bg-gray-50">
-                                    <td className="px-6 py-4">{booking.bookingNumber}</td>
-                                    <td className="px-6 py-4">{new Date(booking.startDate).toLocaleDateString('pt-PT')}</td>
-                                    <td className="px-6 py-4">{new Date(booking.endDate).toLocaleDateString('pt-PT')}</td>
+                                    <td className="px-6 py-4">{booking.booking_number}</td>
+                                    <td className="px-6 py-4">{new Date(booking.start_date).toLocaleDateString('pt-PT')}</td>
+                                    <td className="px-6 py-4">{new Date(booking.end_date).toLocaleDateString('pt-PT')}</td>
                                     <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">
                                         {bike ? `${bike.brand} ${bike.model} (Ref: ${bike.ref_no})` : 'Bicicleta não encontrada'}
                                     </td>
@@ -1182,16 +1303,16 @@ const App: React.FC = () => {
 
     const bikeBookings = useMemo(() => {
         if (!selectedBike) return [];
-        return bookings.filter(b => b.bikeId === selectedBike.id && b.id !== bookingToEdit?.id);
+        return bookings.filter(b => b.bike_id === selectedBike.id && b.id !== bookingToEdit?.id);
     }, [selectedBike, bookings, bookingToEdit]);
       
     const isDateBooked = (date: Date) => {
         const checkDate = new Date(date);
         checkDate.setHours(0, 0, 0, 0);
         return bikeBookings.some(booking => {
-          const start = new Date(booking.startDate);
+          const start = new Date(booking.start_date);
           start.setHours(0, 0, 0, 0);
-          const end = new Date(booking.endDate);
+          const end = new Date(booking.end_date);
           end.setHours(0, 0, 0, 0);
           return checkDate >= start && checkDate <= end;
         });
@@ -1347,7 +1468,7 @@ const App: React.FC = () => {
           {renderDatalistInput('Marca', 'brand', brands)}
           {renderDatalistInput('Modelo', 'model', models)}
           {renderFormSelect('Tamanho', 'size', ['S', 'M', 'L', 'XL'])}
-          {renderFormInput('Data de Entrada', 'entryDate', 'date', true, new Date().toISOString().split('T')[0])}
+          {renderFormInput('Data de Entrada', 'entry_date', 'date', true, new Date().toISOString().split('T')[0])}
           <div className="mb-4">
             <label htmlFor="image" className="block text-sm font-medium text-gray-700 mb-1">Imagem da Bicicleta</label>
             <input type="file" id="image" name="image" accept="image/*" onChange={handleImageChange} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-brand-primary hover:file:bg-blue-100"/>
@@ -1364,7 +1485,7 @@ const App: React.FC = () => {
                 {renderDatalistInput('Marca', 'brand', brands, true, bikeToEdit.brand)}
                 {renderDatalistInput('Modelo', 'model', models, true, bikeToEdit.model)}
                 {renderFormSelect('Tamanho', 'size', ['S', 'M', 'L', 'XL'], true, bikeToEdit.size)}
-                {renderFormInput('Data de Entrada', 'entryDate', 'date', true, bikeToEdit.entryDate.toISOString().split('T')[0])}
+                {renderFormInput('Data de Entrada', 'entry_date', 'date', true, bikeToEdit.entry_date)}
                 {renderFormSelect('Status', 'status', Object.values(BikeStatus), true, bikeToEdit.status)}
                 <div className="mb-4">
                   <label htmlFor="image" className="block text-sm font-medium text-gray-700 mb-1">Alterar Imagem</label>
@@ -1395,9 +1516,9 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="mb-4">
-                    <label htmlFor="workshopNotes" className="block text-sm font-medium text-gray-700 mb-1">Notas da Oficina / Trabalho Realizado</label>
+                    <label htmlFor="workshop_notes" className="block text-sm font-medium text-gray-700 mb-1">Notas da Oficina / Trabalho Realizado</label>
                     <textarea 
-                        id="workshopNotes" 
+                        id="workshop_notes" 
                         rows={3} 
                         value={currentWorkshopNotes}
                         onChange={e => setCurrentWorkshopNotes(e.target.value)}
@@ -1458,7 +1579,7 @@ const App: React.FC = () => {
 
       <Modal isOpen={activeModal === 'booking'} onClose={() => setActiveModal(null)} title={bookingToEdit ? "Editar Reserva" : "Nova Reserva"}>
         <form onSubmit={handleSaveBooking}>
-            {renderFormInput('Número da Reserva', 'bookingNumber', 'text', true, bookingToEdit?.bookingNumber || '')}
+            {renderFormInput('Número da Reserva', 'bookingNumber', 'text', true, bookingToEdit?.booking_number || '')}
             <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Período da Reserva</label>
                 <div className="text-center font-semibold text-brand-primary p-2 bg-blue-50 rounded-md">

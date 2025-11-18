@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Booking, Bike } from '../types';
 import { PencilIcon, TrashIcon } from './Icons';
@@ -12,7 +13,6 @@ interface CalendarProps {
 const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onDeleteBooking }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  // FIX: Add viewMode state to control calendar display (map or list).
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
   const daysOfWeek = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -39,13 +39,13 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onD
 
     const modelsOnDate = bookings
         .filter(booking => {
-            const bookingStart = new Date(booking.startDate);
+            const bookingStart = new Date(booking.start_date);
             bookingStart.setHours(0, 0, 0, 0);
-            const bookingEnd = new Date(booking.endDate);
+            const bookingEnd = new Date(booking.end_date);
             bookingEnd.setHours(0, 0, 0, 0);
             return checkDate >= bookingStart && checkDate <= bookingEnd;
         })
-        .map(booking => bikes.find(b => b.id === booking.bikeId)?.model)
+        .map(booking => bikes.find(b => b.id === booking.bike_id)?.model)
         .filter((model): model is string => !!model);
 
     if (modelsOnDate.length === 0) {
@@ -77,9 +77,9 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onD
     checkDate.setHours(0, 0, 0, 0);
 
     return bookings.filter(booking => {
-        const bookingStart = new Date(booking.startDate);
+        const bookingStart = new Date(booking.start_date);
         bookingStart.setHours(0, 0, 0, 0);
-        const bookingEnd = new Date(booking.endDate);
+        const bookingEnd = new Date(booking.end_date);
         bookingEnd.setHours(0, 0, 0, 0);
         return checkDate >= bookingStart && checkDate <= bookingEnd;
     });
@@ -148,9 +148,9 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onD
             <ul className="space-y-2">
               {bookingsForSelectedDate.map(booking => (
                 <li key={booking.id} className="bg-gray-50 p-3 rounded-md">
-                  <p className="font-semibold text-gray-900">{booking.bookingNumber}</p>
+                  <p className="font-semibold text-gray-900">{booking.booking_number}</p>
                   <p className="text-sm text-gray-600">
-                    {new Date(booking.startDate).toLocaleDateString('pt-PT')} - {new Date(booking.endDate).toLocaleDateString('pt-PT')}
+                    {new Date(booking.start_date).toLocaleDateString('pt-PT')} - {new Date(booking.end_date).toLocaleDateString('pt-PT')}
                   </p>
                 </li>
               ))}
@@ -164,16 +164,16 @@ const Calendar: React.FC<CalendarProps> = ({ bookings, bikes, onEditBooking, onD
   );
 
   const renderBookingList = () => {
-    const sortedBookings = [...bookings].sort((a,b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+    const sortedBookings = [...bookings].sort((a,b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
     
     return (
         <div className="space-y-3">
             {sortedBookings.length > 0 ? sortedBookings.map(booking => (
                  <div key={booking.id} className="bg-gray-50 p-3 rounded-md flex justify-between items-center">
                     <div>
-                        <p className="font-semibold text-gray-900">{booking.bookingNumber}</p>
+                        <p className="font-semibold text-gray-900">{booking.booking_number}</p>
                         <p className="text-sm text-gray-600">
-                        {new Date(booking.startDate).toLocaleDateString('pt-PT')} - {new Date(booking.endDate).toLocaleDateString('pt-PT')}
+                        {new Date(booking.start_date).toLocaleDateString('pt-PT')} - {new Date(booking.end_date).toLocaleDateString('pt-PT')}
                         </p>
                     </div>
                     {onEditBooking && onDeleteBooking && (
