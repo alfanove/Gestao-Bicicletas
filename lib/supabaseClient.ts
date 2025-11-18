@@ -1,14 +1,30 @@
-import { createClient } from '@supabase/supabase-js';
+
+import { createClient, Session, User } from '@supabase/supabase-js';
 import { Bike, MaintenanceRecord, Booking, BikeStatus, MaintenanceStatus } from '../types';
 
-// These environment variables must be set in your hosting environment (e.g., Vercel).
-// They are the Project URL and the public anon key from your Supabase project settings.
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+// Helper to try finding environment variables in different ways (Vite vs Node/Standard)
+const getEnvVar = (key: string, viteKey: string): string | undefined => {
+  // Check standard process.env
+  if (typeof process !== 'undefined' && process.env && process.env[key]) {
+    return process.env[key];
+  }
+  // Check import.meta.env for Vite environments
+  try {
+    // @ts-ignore
+    if (import.meta && import.meta.env) {
+      // @ts-ignore
+      return import.meta.env[key] || import.meta.env[viteKey];
+    }
+  } catch (e) {
+    // Ignore errors accessing import.meta
+  }
+  return undefined;
+};
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Supabase URL and Anon Key are required. Please check your .env file or environment variables.");
-}
+const supabaseUrl = getEnvVar('SUPABASE_URL', 'VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnvVar('SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY');
+
+export const isSupabaseConfigured = !!supabaseUrl && !!supabaseAnonKey;
 
 interface Database {
   public: {
@@ -36,5 +52,10 @@ interface Database {
   };
 }
 
+// We cast to any here to allow the app to load even if config is missing.
+// Checks for 'isSupabaseConfigured' should be done before using the client.
+export const supabase = isSupabaseConfigured
+  ? createClient<Database>(supabaseUrl!, supabaseAnonKey!)
+  : (null as unknown as ReturnType<typeof createClient<Database>>);
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+export type { Session, User };
