@@ -3,7 +3,7 @@ import { Bike, BikeStatus, MaintenanceRecord, MaintenanceStatus, Booking } from 
 import { PlusIcon, WrenchIcon, CalendarIcon, ArrowLeftIcon, TrashIcon, PencilIcon, BellIcon } from './components/Icons';
 import Modal from './components/Modal';
 import Calendar from './components/Calendar';
-import { supabase } from './lib/supabaseClient';
+import { MOCK_BIKES, MOCK_BOOKINGS, MOCK_MAINTENANCE_RECORDS } from './data/mock';
 
 
 const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
@@ -30,41 +30,10 @@ const BikeStatusBadge = ({ status }: { status: BikeStatus }) => {
 }
 
 const App: React.FC = () => {
-  const [bikes, setBikes] = useState<Bike[]>([]);
-  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [bikes, setBikes] = useState<Bike[]>(MOCK_BIKES);
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(MOCK_MAINTENANCE_RECORDS);
+  const [bookings, setBookings] = useState<Booking[]>(MOCK_BOOKINGS);
   
-  // Fetch initial data from Supabase
-  useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const { data: bikesData, error: bikesError } = await supabase.from('bikes').select('*').order('created_at', { ascending: false });
-        if (bikesError) throw bikesError;
-        setBikes(bikesData || []);
-        
-        const { data: maintData, error: maintError } = await supabase.from('maintenance_records').select('*');
-        if (maintError) throw maintError;
-        setMaintenanceRecords(maintData || []);
-
-        const { data: bookingsData, error: bookingsError } = await supabase.from('bookings').select('*');
-        if (bookingsError) throw bookingsError;
-        setBookings(bookingsData || []);
-
-      } catch (err: any) {
-        setError(`Erro ao carregar dados: ${err.message}`);
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-
   // State for confirmation modal
   const [confirmationModal, setConfirmationModal] = useState<{ 
     isOpen: boolean; 
@@ -127,7 +96,7 @@ const App: React.FC = () => {
   const [bookingFilterModel, setBookingFilterModel] = useState('');
   const [bookingFilterSize, setBookingFilterSize] = useState<'S' | 'M' | 'L' | 'XL' | ''>('');
   const [bookingsViewMode, setBookingsViewMode] = useState<'calendar' | 'list'>('list');
-  const [currentBookingsCalendarDate, setCurrentBookingsCalendarDate] = useState(new Date('2025-11-01'));
+  const [currentBookingsCalendarDate, setCurrentBookingsCalendarDate] = useState(new Date());
   
   // State for notifications
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -284,100 +253,58 @@ const App: React.FC = () => {
     }
   };
   
-  const uploadBikeImage = async (): Promise<string | null> => {
-    if (!imageFile) return null;
-    const fileName = `${Date.now()}_${imageFile.name}`;
-    const { error: uploadError } = await supabase.storage
-        .from('bike-images')
-        .upload(fileName, imageFile);
-    
-    if (uploadError) {
-        setError(`Erro no upload da imagem: ${uploadError.message}`);
-        return null;
-    }
-    
-    const { data } = supabase.storage.from('bike-images').getPublicUrl(fileName);
-    return data.publicUrl;
-  };
-
-  const handleAddBike = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddBike = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
 
     let imageUrl = `https://picsum.photos/seed/bike${Date.now()}/400/300`;
     if (imageFile) {
-        const uploadedUrl = await uploadBikeImage();
-        if (uploadedUrl) {
-            imageUrl = uploadedUrl;
-        } else {
-            return; // Error was already set in uploadBikeImage
-        }
+        imageUrl = URL.createObjectURL(imageFile);
     }
     
-    const bikeData = {
+    const newBike: Bike = {
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
       ref_no: (form.elements.namedItem('ref_no') as HTMLInputElement).value,
       brand: (form.elements.namedItem('brand') as HTMLInputElement).value.trim(),
       model: (form.elements.namedItem('model') as HTMLInputElement).value.trim(),
-      size: (form.elements.namedItem('size') as HTMLSelectElement).value,
+      size: (form.elements.namedItem('size') as HTMLSelectElement).value as 'S' | 'M' | 'L' | 'XL',
       entry_date: (form.elements.namedItem('entry_date') as HTMLInputElement).value,
       status: BikeStatus.AVAILABLE,
       image_url: imageUrl,
     };
 
-    const { data: newBike, error } = await supabase.from('bikes').insert(bikeData).select().single();
-    
-    if (error) {
-        setError(`Erro ao adicionar bicicleta: ${error.message}`);
-    } else if (newBike) {
-        setBikes(prev => [newBike, ...prev]);
-        setActiveModal(null);
-    }
+    setBikes(prev => [newBike, ...prev]);
+    setActiveModal(null);
   };
   
-  const handleEditBike = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleEditBike = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!bikeToEdit) return;
     const form = e.currentTarget;
 
     let imageUrl = bikeToEdit.image_url;
-    if (imageFile && imagePreview !== bikeToEdit.image_url) {
-        const uploadedUrl = await uploadBikeImage();
-        if (uploadedUrl) {
-            imageUrl = uploadedUrl;
-            // Optionally, delete old image from storage
-            if (bikeToEdit.image_url.includes('supabase')) {
-                const oldFileName = bikeToEdit.image_url.split('/').pop();
-                if (oldFileName) {
-                    await supabase.storage.from('bike-images').remove([oldFileName]);
-                }
-            }
-        } else {
-            return; // Error occurred during upload
-        }
+    if (imageFile) {
+        imageUrl = URL.createObjectURL(imageFile);
     }
 
-    const updatedData = {
+    const updatedBike: Bike = {
+        ...bikeToEdit,
         ref_no: (form.elements.namedItem('ref_no') as HTMLInputElement).value,
         brand: (form.elements.namedItem('brand') as HTMLInputElement).value.trim(),
         model: (form.elements.namedItem('model') as HTMLInputElement).value.trim(),
-        size: (form.elements.namedItem('size') as HTMLSelectElement).value,
+        size: (form.elements.namedItem('size') as HTMLSelectElement).value as 'S' | 'M' | 'L' | 'XL',
         entry_date: (form.elements.namedItem('entry_date') as HTMLInputElement).value,
         status: (form.elements.namedItem('status') as HTMLSelectElement).value as BikeStatus,
         image_url: imageUrl,
     };
     
-    const { data: updatedBike, error } = await supabase.from('bikes').update(updatedData).eq('id', bikeToEdit.id).select().single();
-
-    if (error) {
-        setError(`Erro ao editar bicicleta: ${error.message}`);
-    } else if (updatedBike) {
-        setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
-        if (selectedBike?.id === updatedBike.id) {
-            setSelectedBike(updatedBike);
-        }
-        setActiveModal(null);
-        setBikeToEdit(null);
+    setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+    if (selectedBike?.id === updatedBike.id) {
+        setSelectedBike(updatedBike);
     }
+    setActiveModal(null);
+    setBikeToEdit(null);
   };
 
   const handleDeleteBike = (bike: Bike) => {
@@ -385,98 +312,60 @@ const App: React.FC = () => {
         isOpen: true,
         title: "Confirmar Eliminação",
         message: "Tem a certeza que deseja remover esta bicicleta? Todos os registos associados (manutenção, reservas) serão também eliminados.",
-        onConfirm: async () => {
-            // Delete image from storage first
-            if (bike.image_url.includes('supabase')) {
-                const fileName = bike.image_url.split('/').pop();
-                if (fileName) {
-                    const { error: storageError } = await supabase.storage.from('bike-images').remove([fileName]);
-                    if (storageError) {
-                         setError(`Erro ao apagar imagem: ${storageError.message}`);
-                         // Don't proceed if image deletion fails, to avoid orphans
-                         setConfirmationModal(null);
-                         return;
-                    }
-                }
-            }
-
-            // DB will cascade delete bookings and maintenance records
-            const { error } = await supabase.from('bikes').delete().eq('id', bike.id);
-            if (error) {
-                setError(`Erro ao apagar bicicleta: ${error.message}`);
-            } else {
-                setBikes(bikes.filter(b => b.id !== bike.id));
-                // No need to manually filter maintenance/bookings due to CASCADE
-                if(selectedBike?.id === bike.id) setSelectedBike(null);
-            }
+        onConfirm: () => {
+            setBikes(prev => prev.filter(b => b.id !== bike.id));
+            setMaintenanceRecords(prev => prev.filter(m => m.bike_id !== bike.id));
+            setBookings(prev => prev.filter(b => b.bike_id !== bike.id));
+            
+            if(selectedBike?.id === bike.id) setSelectedBike(null);
             setConfirmationModal(null);
         }
     });
   };
 
-  const handleReportFault = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleReportFault = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedBike) return;
 
     const description = (e.currentTarget.elements.namedItem('faultDescription') as HTMLTextAreaElement).value;
-    const newRecordData = {
+    const newRecord: MaintenanceRecord = {
+      id: crypto.randomUUID(),
+      created_at: new Date().toISOString(),
       bike_id: selectedBike.id,
       description: description,
       tasks: [],
       workshop_notes: '',
-      reported_date: new Date().toISOString(),
+      reported_date: new Date().toISOString().split('T')[0],
       status: MaintenanceStatus.PENDING,
     };
     
-    const { data: newRecord, error: insertError } = await supabase.from('maintenance_records').insert(newRecordData).select().single();
-    if (insertError) {
-        setError(`Erro ao reportar avaria: ${insertError.message}`);
-        return;
-    }
-
-    const { data: updatedBike, error: updateError } = await supabase.from('bikes').update({ status: BikeStatus.MAINTENANCE }).eq('id', selectedBike.id).select().single();
-    if (updateError) {
-        setError(`Erro ao atualizar estado da bicicleta: ${updateError.message}`);
-        return;
-    }
-
-    if (newRecord && updatedBike) {
-        setMaintenanceRecords(prev => [newRecord, ...prev]);
-        setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
-        setSelectedBike(updatedBike);
-        setActiveModal(null);
-    }
+    const updatedBike = { ...selectedBike, status: BikeStatus.MAINTENANCE };
+    
+    setMaintenanceRecords(prev => [newRecord, ...prev]);
+    setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+    setSelectedBike(updatedBike);
+    setActiveModal(null);
   };
   
-  const handleStartMaintenance = async () => {
+  const handleStartMaintenance = () => {
       if (!selectedBike) return;
-      const newRecordData = {
+      const newRecord: MaintenanceRecord = {
+        id: crypto.randomUUID(),
+        created_at: new Date().toISOString(),
         bike_id: selectedBike.id,
         description: "Manutenção de rotina iniciada pela oficina.",
         tasks: [],
         workshop_notes: '',
-        reported_date: new Date().toISOString(),
+        reported_date: new Date().toISOString().split('T')[0],
         status: MaintenanceStatus.PENDING,
       };
 
-      const { data: newRecord, error: insertError } = await supabase.from('maintenance_records').insert(newRecordData).select().single();
-      if (insertError) {
-          setError(`Erro ao iniciar manutenção: ${insertError.message}`);
-          return;
-      }
+      const updatedBike = { ...selectedBike, status: BikeStatus.MAINTENANCE };
 
-      const { data: updatedBike, error: updateError } = await supabase.from('bikes').update({ status: BikeStatus.MAINTENANCE }).eq('id', selectedBike.id).select().single();
-       if (updateError) {
-        setError(`Erro ao atualizar estado da bicicleta: ${updateError.message}`);
-        return;
-      }
-      
-      if (newRecord && updatedBike) {
-          setMaintenanceRecords(prev => [newRecord, ...prev]);
-          setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
-          setSelectedBike(updatedBike);
-          openMaintenanceProcessModal(newRecord);
-      }
+      setMaintenanceRecords(prev => [newRecord, ...prev]);
+      setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
+      setSelectedBike(updatedBike);
+      openMaintenanceProcessModal(newRecord);
   };
 
   const openMaintenanceProcessModal = (record: MaintenanceRecord) => {
@@ -487,32 +376,27 @@ const App: React.FC = () => {
     setActiveModal('maintenanceProcess');
   };
   
-  const handleSaveMaintenanceProcess = async (conclude: boolean) => {
+  const handleSaveMaintenanceProcess = (conclude: boolean) => {
     if (!maintenanceRecordToProcess) return;
 
-    const updatedRecordData = { 
+    const updatedRecord: MaintenanceRecord = { 
+        ...maintenanceRecordToProcess,
         tasks: currentEditingTasks,
         workshop_notes: currentWorkshopNotes,
-        ...(conclude && { status: MaintenanceStatus.RESOLVED, resolved_date: new Date().toISOString() })
+        ...(conclude && { 
+            status: MaintenanceStatus.RESOLVED, 
+            resolved_date: new Date().toISOString().split('T')[0] 
+        })
     };
 
-    const { data: updatedRecord, error } = await supabase.from('maintenance_records').update(updatedRecordData).eq('id', maintenanceRecordToProcess.id).select().single();
-    if (error) {
-        setError(`Erro ao salvar manutenção: ${error.message}`);
-        return;
-    }
-    
-    if (updatedRecord) {
-        setMaintenanceRecords(maintenanceRecords.map(m => m.id === updatedRecord.id ? updatedRecord : m));
-    }
+    setMaintenanceRecords(maintenanceRecords.map(m => m.id === updatedRecord.id ? updatedRecord : m));
 
     if (conclude) {
         const hasOtherPending = maintenanceRecords.some(m => m.bike_id === maintenanceRecordToProcess.bike_id && m.status === MaintenanceStatus.PENDING && m.id !== maintenanceRecordToProcess.id);
         if (!hasOtherPending) {
-            const { data: updatedBike, error: bikeError } = await supabase.from('bikes').update({ status: BikeStatus.AVAILABLE }).eq('id', maintenanceRecordToProcess.bike_id).select().single();
-            if (bikeError) {
-                 setError(`Erro ao atualizar estado da bicicleta: ${bikeError.message}`);
-            } else if (updatedBike) {
+            const bikeToUpdate = bikes.find(b => b.id === maintenanceRecordToProcess.bike_id);
+            if(bikeToUpdate) {
+                const updatedBike = { ...bikeToUpdate, status: BikeStatus.AVAILABLE };
                 setBikes(bikes.map(b => b.id === updatedBike.id ? updatedBike : b));
                 setSelectedBike(prev => prev && prev.id === updatedBike.id ? updatedBike : prev);
             }
@@ -548,7 +432,7 @@ const App: React.FC = () => {
 
   const toYYYYMMDD = (date: Date) => date.toISOString().split('T')[0];
 
-  const handleSaveBooking = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveBooking = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!bookingStartDate || !bookingEndDate) {
       alert("Por favor, selecione uma data de início e de fim.");
@@ -560,7 +444,7 @@ const App: React.FC = () => {
     }
 
     const formData = new FormData(e.currentTarget);
-    const bookingData = {
+    const bookingDetails = {
       booking_number: formData.get('bookingNumber') as string,
       notes: formData.get('notes') as string,
       start_date: toYYYYMMDD(bookingStartDate),
@@ -570,20 +454,16 @@ const App: React.FC = () => {
 
     if (bookingToEdit) {
       // Editing existing booking
-      const { data: updatedBooking, error } = await supabase.from('bookings').update(bookingData).eq('id', bookingToEdit.id).select().single();
-      if (error) {
-          setError(`Erro ao editar reserva: ${error.message}`);
-      } else if (updatedBooking) {
-          setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
-      }
+      const updatedBooking: Booking = { ...bookingToEdit, ...bookingDetails };
+      setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
     } else {
       // Adding new booking
-      const { data: newBooking, error } = await supabase.from('bookings').insert(bookingData).select().single();
-      if (error) {
-          setError(`Erro ao criar reserva: ${error.message}`);
-      } else if (newBooking) {
-          setBookings([newBooking, ...bookings]);
-      }
+      const newBooking: Booking = {
+          id: crypto.randomUUID(),
+          created_at: new Date().toISOString(),
+          ...bookingDetails
+      };
+      setBookings([newBooking, ...bookings]);
     }
     
     setActiveModal(null);
@@ -594,13 +474,8 @@ const App: React.FC = () => {
         isOpen: true,
         title: "Confirmar Eliminação",
         message: "Tem a certeza que deseja remover esta reserva? Esta ação não pode ser desfeita.",
-        onConfirm: async () => {
-            const { error } = await supabase.from('bookings').delete().eq('id', bookingId);
-            if (error) {
-                setError(`Erro ao apagar reserva: ${error.message}`);
-            } else {
-                setBookings(bookings.filter(b => b.id !== bookingId));
-            }
+        onConfirm: () => {
+            setBookings(bookings.filter(b => b.id !== bookingId));
             setConfirmationModal(null);
         }
     });
@@ -746,40 +621,7 @@ const App: React.FC = () => {
     )
   }
 
-  const renderBikeList = () => {
-    if (isLoading) {
-        return (
-            <div className="p-4 sm:p-6 lg:p-8">
-                <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
-                    <div className="flex items-center gap-4">
-                        <button disabled className="flex items-center gap-2 bg-brand-primary/50 text-white font-bold px-4 py-2 rounded-lg cursor-not-allowed">
-                            <PlusIcon className="h-5 w-5" />
-                            <span>Adicionar Bicicleta</span>
-                        </button>
-                    </div>
-                </div>
-                <div className="text-center py-20 text-gray-500">
-                    <p>A carregar bicicletas da base de dados...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (error) {
-         return (
-            <div className="p-4 sm:p-6 lg:p-8">
-                <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
-                </div>
-                <div className="text-center py-20 bg-red-50 text-red-600 rounded-lg shadow">
-                    <p>{error}</p>
-                </div>
-            </div>
-        );
-    }
-      
-    return (
+  const renderBikeList = () => (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-800">Parque de Bicicletas</h1>
@@ -903,7 +745,7 @@ const App: React.FC = () => {
         )}
       </div>
     </div>
-  )};
+  );
 
   const renderBikeDetails = () => (
     selectedBike && (
